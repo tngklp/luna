@@ -100,10 +100,10 @@ jobs:
         with:
           name: gui-${{ matrix.target }}
           path: |
-            crates/luna-gui/target/*/release/bundle/**/*.msi
-            crates/luna-gui/target/*/release/bundle/**/*.exe
-            crates/luna-gui/target/*/release/bundle/**/*.dmg
-            crates/luna-gui/target/*/release/bundle/**/*.app.tar.gz
+            target/*/release/bundle/**/*.msi
+            target/*/release/bundle/**/*.exe
+            target/*/release/bundle/**/*.dmg
+            target/*/release/bundle/**/*.app.tar.gz
           if-no-files-found: error
 
   release:
