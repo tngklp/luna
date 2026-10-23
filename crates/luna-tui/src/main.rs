@@ -113,29 +113,27 @@ mod anyhow_noop {
     pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 }
 
-fn pick_provider(cfg: &Config) -> Option<(String, Arc<dyn luna_core::provider::Provider>, (String, u32, f32))> {
-    if cfg.providers.anthropic.enabled {
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            if let Ok(p) = luna_core::provider::anthropic::AnthropicProvider::new(key) {
+/// Resolved provider settings tuple: (model, max_tokens, temperature).
+pub type ProviderSettingsTuple = (String, u32, f32);
+
+fn pick_provider(cfg: &Config) -> Option<(String, Arc<dyn luna_core::provider::Provider>, ProviderSettingsTuple)> {
+    if cfg.providers.anthropic.enabled
+        && let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
+            && let Ok(p) = luna_core::provider::anthropic::AnthropicProvider::new(key) {
                 let c = &cfg.providers.anthropic;
                 return Some(("anthropic".into(), Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
             }
-        }
-    }
-    if cfg.providers.openai.enabled {
-        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-            if let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::openai(key) {
+    if cfg.providers.openai.enabled
+        && let Ok(key) = std::env::var("OPENAI_API_KEY")
+            && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::openai(key) {
                 let c = &cfg.providers.openai;
                 return Some(("openai".into(), Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
             }
-        }
-    }
-    if cfg.providers.ollama.enabled {
-        if let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::ollama() {
+    if cfg.providers.ollama.enabled
+        && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::ollama() {
             let c = &cfg.providers.ollama;
             return Some(("ollama".into(), Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
         }
-    }
     None
 }
 

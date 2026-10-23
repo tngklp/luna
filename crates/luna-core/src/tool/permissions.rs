@@ -63,11 +63,10 @@ impl PermissionGate {
     pub fn evaluate(&self, tool: &str, input: &Value) -> Decision {
         // Exact deny wins first.
         for rule in &self.rules {
-            if let Rule::DenyTool { tool: t } = rule {
-                if t == tool {
+            if let Rule::DenyTool { tool: t } = rule
+                && t == tool {
                     return Decision::Denied(format!("tool `{tool}` is denied by config"));
                 }
-            }
         }
 
         // Tool-specific contextual rules.
@@ -87,11 +86,10 @@ impl PermissionGate {
 
         // Exact allow.
         for rule in &self.rules {
-            if let Rule::AllowTool { tool: t } = rule {
-                if t == tool {
+            if let Rule::AllowTool { tool: t } = rule
+                && t == tool {
                     return Decision::Allowed;
                 }
-            }
         }
 
         // Default: tools flagged for approval need it; others allowed.
@@ -107,14 +105,13 @@ impl PermissionGate {
     pub fn evaluate_with_registry(&self, tool: &str, input: &Value, registry: &crate::tool::registry::ToolRegistry) -> Decision {
         // Registry-flagged tools always need approval unless an explicit
         // AllowTool rule whitelists them.
-        if let Some(t) = registry.get(tool) {
-            if t.requires_approval() {
+        if let Some(t) = registry.get(tool)
+            && t.requires_approval() {
                 let explicitly_allowed = self.rules.iter().any(|r| matches!(r, Rule::AllowTool { tool: allowed } if allowed == tool));
                 if !explicitly_allowed {
                     return Decision::NeedsApproval;
                 }
             }
-        }
         self.evaluate(tool, input)
     }
 
@@ -143,20 +140,18 @@ impl PermissionGate {
                         )));
                     }
                 }
-                Rule::AllowCommandPrefix { prefix } => {
-                    if cmd.starts_with(prefix.as_str()) || first == prefix {
+                Rule::AllowCommandPrefix { prefix }
+                    if (cmd.starts_with(prefix.as_str()) || first == prefix) => {
                         return Some(Decision::Allowed);
                     }
-                }
                 _ => {}
             }
         }
         None
     }
 
-    fn eval_path(&self, tool: &str, input: &Value) -> Option<Decision> {
-        let path_field = if tool == "list_dir" { "path" } else { "path" };
-        let raw = input[path_field].as_str()?;
+    fn eval_path(&self, _tool: &str, input: &Value) -> Option<Decision> {
+        let raw = input["path"].as_str()?;
         let path = Path::new(raw);
         for rule in &self.rules {
             match rule {
@@ -168,11 +163,10 @@ impl PermissionGate {
                         )));
                     }
                 }
-                Rule::AllowPath { path: p } => {
-                    if path.starts_with(p) {
+                Rule::AllowPath { path: p }
+                    if path.starts_with(p) => {
                         return Some(Decision::Allowed);
                     }
-                }
                 _ => {}
             }
         }

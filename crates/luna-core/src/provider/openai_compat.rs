@@ -210,11 +210,10 @@ fn parse_sse_event(data: &str, label: &str) -> Option<StreamChunk> {
     let choice = &v["choices"][0];
     let delta = &choice["delta"];
 
-    if let Some(text) = delta["content"].as_str() {
-        if !text.is_empty() {
+    if let Some(text) = delta["content"].as_str()
+        && !text.is_empty() {
             return Some(StreamChunk::TextDelta(text.to_string()));
         }
-    }
 
     if let Some(calls) = delta["tool_calls"].as_array() {
         for call in calls {

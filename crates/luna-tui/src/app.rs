@@ -29,6 +29,15 @@ pub struct PendingApproval {
     pub arguments: String,
 }
 
+/// Live state of one agent in a multi-agent run.
+#[derive(Debug, Clone, Default)]
+pub struct AgentState {
+    pub parent: Option<String>,
+    pub status: String,
+    pub last_output: String,
+    pub tool_calls: u32,
+}
+
 pub struct App {
     pub lines: Vec<Line>,
     pub input: String,
@@ -37,6 +46,10 @@ pub struct App {
     pub running: bool,
     pub status: String,
     pub approval: Option<PendingApproval>,
+    /// Per-agent dashboard state, keyed by agent id.
+    pub agents: HashMap<String, AgentState>,
+    /// Which agent pane is focused (None = main conversation).
+    pub focus_agent: Option<String>,
 }
 
 impl App {
@@ -49,12 +62,18 @@ impl App {
             running: false,
             status: "idle".into(),
             approval: None,
+            agents: HashMap::new(),
+            focus_agent: None,
         }
     }
 
     fn push(&mut self, line: Line) {
         self.lines.push(line);
         self.scroll = 0;
+    }
+
+    fn touch_agent(&mut self, agent_id: &str) -> &mut AgentState {
+        self.agents.entry(agent_id.to_string()).or_default()
     }
 }
 
@@ -125,9 +144,9 @@ pub fn run(
 
         terminal.draw(|f| ui::draw(f, &app))?;
 
-        if crossterm::event::poll(std::time::Duration::from_millis(50))? {
-            if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
-                if key.kind == crossterm::event::KeyEventKind::Press {
+        if crossterm::event::poll(std::time::Duration::from_millis(50))?
+            && let crossterm::event::Event::Key(key) = crossterm::event::read()?
+                && key.kind == crossterm::event::KeyEventKind::Press {
                     use crossterm::event::{KeyCode, KeyModifiers};
                     match (key.code, key.modifiers) {
                         (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
@@ -136,6 +155,21 @@ pub fn run(
                         }
                         (KeyCode::Char('d'), KeyModifiers::CONTROL) if app.running => {
                             cancel.cancel();
+                        }
+                        (KeyCode::Tab, _) => {
+                            // Cycle focus: main → each agent → main.
+                            let ids: Vec<String> = {
+                                let mut v: Vec<String> = app.agents.keys().cloned().collect();
+                                v.sort();
+                                v
+                            };
+                            app.focus_agent = match &app.focus_agent {
+                                None => ids.first().cloned(),
+                                Some(cur) => {
+                                    let idx = ids.iter().position(|i| i == cur).map(|i| i + 1).unwrap_or(usize::MAX);
+                                    if idx < ids.len() { Some(ids[idx].clone()) } else { None }
+                                }
+                            };
                         }
                         (KeyCode::Esc, _) => {
                             if let Some(p) = app.approval.take() {
@@ -193,15 +227,12 @@ pub fn run(
                                     if done_rx.recv_timeout(std::time::Duration::from_millis(50)).is_ok() {
                                         break;
                                     }
-                                    loop {
-                                        match rx.try_recv() {
-                                            Ok(ev) => absorb(&mut app, &ev),
-                                            Err(_) => break,
-                                        }
+                                    while let Ok(ev) = rx.try_recv() {
+                                        absorb(&mut app, &ev);
                                     }
-                                    if crossterm::event::poll(std::time::Duration::from_millis(0))? {
-                                        if let crossterm::event::Event::Key(k) = crossterm::event::read()? {
-                                            if k.kind == crossterm::event::KeyEventKind::Press {
+                                    if crossterm::event::poll(std::time::Duration::from_millis(0))?
+                                        && let crossterm::event::Event::Key(k) = crossterm::event::read()?
+                                            && k.kind == crossterm::event::KeyEventKind::Press {
                                                 use crossterm::event::{KeyCode as K, KeyModifiers as M};
                                                 match (k.code, k.modifiers) {
                                                     (K::Char('d'), m) if m.contains(M::CONTROL) => cancel.cancel(),
@@ -222,8 +253,6 @@ pub fn run(
                                                     _ => {}
                                                 }
                                             }
-                                        }
-                                    }
                                 }
 
                                 app.running = false;
@@ -239,8 +268,6 @@ pub fn run(
                         _ => {}
                     }
                 }
-            }
-        }
 
         if app.should_quit {
             cancel.cancel();
@@ -262,11 +289,19 @@ fn resolve(
 
 fn absorb(app: &mut App, ev: &LunaEvent) {
     match &ev.kind {
-        EventKind::TokenDelta(t) => match app.lines.last_mut() {
-            Some(Line::Assistant(s)) => s.push_str(t),
-            _ => app.push(Line::Assistant(t.clone())),
-        },
+        EventKind::TokenDelta(t) => {
+            let agent = ev.agent_id.clone().unwrap_or_default();
+            app.touch_agent(&agent).last_output.push_str(t);
+            match app.lines.last_mut() {
+                Some(Line::Assistant(s)) => s.push_str(t),
+                _ => app.push(Line::Assistant(t.clone())),
+            }
+        }
         EventKind::ToolCallRequested { name, arguments, .. } => {
+            if let Some(a) = &ev.agent_id {
+                app.touch_agent(a).tool_calls += 1;
+                app.touch_agent(a).status = format!("tool: {name}");
+            }
             app.push(Line::Tool {
                 name: name.clone(),
                 detail: serde_json::to_string(arguments).unwrap_or_default(),
@@ -274,6 +309,9 @@ fn absorb(app: &mut App, ev: &LunaEvent) {
             });
         }
         EventKind::ToolCallFinished { name, outcome, .. } => {
+            if let Some(a) = &ev.agent_id {
+                app.touch_agent(a).status = "running".into();
+            }
             app.push(Line::Tool {
                 name: format!("{name} →"),
                 detail: if outcome.content.len() > 400 {
@@ -291,12 +329,24 @@ fn absorb(app: &mut App, ev: &LunaEvent) {
                 arguments: serde_json::to_string_pretty(arguments).unwrap_or_default(),
             });
         }
+        EventKind::AgentSpawned { agent_id, parent, .. } => {
+            let st = app.touch_agent(agent_id);
+            st.parent = parent.clone();
+            st.status = "spawned".into();
+            app.push(Line::Transition(format!(
+                "spawned {agent_id}{}",
+                parent.as_ref().map(|p| format!(" (child of {p})")).unwrap_or_default()
+            )));
+        }
         EventKind::OrchestratorTransition(d) => app.push(Line::Transition(d.clone())),
-        EventKind::AgentSpawned { agent_id, parent, .. } => app.push(Line::Transition(format!(
-            "spawned {agent_id}{}",
-            parent.as_ref().map(|p| format!(" (child of {p})")).unwrap_or_default()
-        ))),
-        EventKind::RunFinished { error, .. } => {
+        EventKind::RunFinished { summary, error } => {
+            if let Some(a) = &ev.agent_id {
+                let st = app.touch_agent(a);
+                if let Some(s) = summary {
+                    st.last_output = s.clone();
+                }
+                st.status = if error.is_some() { "failed".into() } else { "done".into() };
+            }
             if let Some(e) = error {
                 if e != "cancelled" {
                     app.push(Line::Error(e.clone()));

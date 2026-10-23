@@ -301,25 +301,24 @@ impl CreationFlagsExt for std::process::Command {
     }
 }
 
-fn pick_provider(cfg: &luna_core::config::Config) -> Option<(String, std::sync::Arc<dyn luna_core::provider::Provider>, (String, u32, f32))> {    // Env-var API keys take precedence in provider selection order.
-    if cfg.providers.anthropic.enabled {
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            if let Ok(p) = luna_core::provider::anthropic::AnthropicProvider::new(key) {
+/// Resolved provider settings tuple: (model, max_tokens, temperature).
+type ProviderSettingsTuple = (String, u32, f32);
+
+fn pick_provider(cfg: &luna_core::config::Config) -> Option<(String, std::sync::Arc<dyn luna_core::provider::Provider>, ProviderSettingsTuple)> {    // Env-var API keys take precedence in provider selection order.
+    if cfg.providers.anthropic.enabled
+        && let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
+            && let Ok(p) = luna_core::provider::anthropic::AnthropicProvider::new(key) {
                 let c = &cfg.providers.anthropic;
                 return Some(("anthropic".into(), std::sync::Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
             }
-        }
-    }
-    if cfg.providers.openai.enabled {
-        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-            if let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::openai(key) {
+    if cfg.providers.openai.enabled
+        && let Ok(key) = std::env::var("OPENAI_API_KEY")
+            && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::openai(key) {
                 let c = &cfg.providers.openai;
                 return Some(("openai".into(), std::sync::Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
             }
-        }
-    }
-    if cfg.providers.ollama.enabled {
-        if let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::ollama() {
+    if cfg.providers.ollama.enabled
+        && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::ollama() {
             let c = &cfg.providers.ollama;
             return Some((
                 "ollama".into(),
@@ -327,7 +326,6 @@ fn pick_provider(cfg: &luna_core::config::Config) -> Option<(String, std::sync::
                 (c.model.clone(), c.max_tokens, c.temperature),
             ));
         }
-    }
     None
 }
 

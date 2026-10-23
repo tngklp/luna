@@ -51,7 +51,7 @@ impl MessageKind {
 #[derive(Clone)]
 pub struct Mailbox {
     agent_id: String,
-    rx: Arc<Mutex<mpsc::Receiver<AgentMessage>>>,
+    rx: Arc<tokio::sync::Mutex<mpsc::Receiver<AgentMessage>>>,
 }
 
 /// Send handle into an agent's mailbox.
@@ -83,8 +83,13 @@ impl MailboxTx {
 
 impl Mailbox {
     /// Take all currently queued messages without awaiting.
+    ///
+    /// Uses `try_lock` so it never blocks; returns empty if the lock is
+    /// contended (another task is mid-recv).
     pub fn drain(&self) -> Vec<AgentMessage> {
-        let mut rx = self.rx.lock().unwrap();
+        let Ok(mut rx) = self.rx.try_lock() else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
         while let Ok(msg) = rx.try_recv() {
             out.push(msg);
@@ -94,7 +99,7 @@ impl Mailbox {
 
     /// Receive the next message, awaiting if empty. Honors cancellation.
     pub async fn recv(&self, cancel: &tokio_util::sync::CancellationToken) -> Option<AgentMessage> {
-        let mut rx = self.rx.lock().unwrap();
+        let mut rx = self.rx.lock().await;
         tokio::select! {
             msg = rx.recv() => msg,
             _ = cancel.cancelled() => None,
@@ -125,7 +130,7 @@ impl MessageHub {
         let tx_handle = MailboxTx { agent_id: agent_id.to_string(), tx };
         let rx_handle = Mailbox {
             agent_id: agent_id.to_string(),
-            rx: Arc::new(Mutex::new(rx)),
+            rx: Arc::new(tokio::sync::Mutex::new(rx)),
         };
         self.boxes.lock().unwrap().insert(agent_id.to_string(), tx_handle.clone());
         (rx_handle, tx_handle)
@@ -140,7 +145,12 @@ impl MessageHub {
         body: impl Into<String>,
         data: Option<Value>,
     ) -> Result<(), String> {
-        match self.boxes.lock().unwrap().get(to) {
+        // Clone the sender out of the lock before awaiting the send.
+        let tx = {
+            let boxes = self.boxes.lock().unwrap();
+            boxes.get(to).cloned()
+        };
+        match tx {
             Some(tx) => tx.send(from, kind, body, data).await,
             None => Err(format!("no mailbox for agent `{to}`")),
         }
@@ -149,14 +159,15 @@ impl MessageHub {
     /// Broadcast to every registered agent except `from`.
     pub async fn broadcast(&self, from: &str, kind: MessageKind, body: impl Into<String>) {
         let body = body.into();
-        let targets: Vec<MailboxTx> = self
-            .boxes
-            .lock()
-            .unwrap()
-            .values()
-            .filter(|t| t.agent_id != from)
-            .cloned()
-            .collect();
+        // Clone targets out of the lock before awaiting sends.
+        let targets: Vec<MailboxTx> = {
+            let boxes = self.boxes.lock().unwrap();
+            boxes
+                .values()
+                .filter(|t| t.agent_id != from)
+                .cloned()
+                .collect()
+        };
         for t in targets {
             let _ = t.send(from, kind, body.clone(), None).await;
         }
