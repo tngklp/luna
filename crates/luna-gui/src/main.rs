@@ -57,16 +57,24 @@ impl ApprovalSink for GuiApprovals {
 }
 
 /// A JSON-serializable snapshot of a core event for the webview.
+/// Every payload carries `agent_id` (empty string = orchestrator/global).
+#[derive(serde::Serialize, Clone)]
+struct UiEvent {
+    agent_id: String,
+    #[serde(flatten)]
+    kind: UiEventKind,
+}
+
 #[derive(serde::Serialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum UiEvent {
+enum UiEventKind {
     RunStarted,
     UserMessage { text: String },
     AssistantMessage { text: String },
     TokenDelta { text: String },
     ToolCallRequested { call_id: String, name: String, arguments: serde_json::Value },
     ToolCallFinished { call_id: String, name: String, outcome: String, is_error: bool },
-    ApprovalRequested { request_id: String, agent_id: String, tool_name: String, arguments: serde_json::Value },
+    ApprovalRequested { request_id: String, tool_name: String, arguments: serde_json::Value },
     ApprovalResolved { request_id: String, approved: bool },
     AgentSpawned { agent_id: String, parent: Option<String>, spec_name: String },
     OrchestratorTransition { description: String },
@@ -74,50 +82,47 @@ enum UiEvent {
 }
 
 impl UiEvent {
-    fn from_core(ev: &LunaEvent) -> Option<(String, Self)> {
+    fn from_core(ev: &LunaEvent) -> Option<Self> {
         let agent = ev.agent_id.clone().unwrap_or_default();
-        let payload = match &ev.kind {
-            EventKind::RunStarted => UiEvent::RunStarted,
-            EventKind::UserMessage(text) => UiEvent::UserMessage { text: text.clone() },
-            EventKind::AssistantMessage(text) => UiEvent::AssistantMessage { text: text.clone() },
-            EventKind::TokenDelta(text) => UiEvent::TokenDelta { text: text.clone() },
-            EventKind::ToolCallRequested { call_id, name, arguments } => UiEvent::ToolCallRequested {
+        let kind = match &ev.kind {
+            EventKind::RunStarted => UiEventKind::RunStarted,
+            EventKind::UserMessage(text) => UiEventKind::UserMessage { text: text.clone() },
+            EventKind::AssistantMessage(text) => UiEventKind::AssistantMessage { text: text.clone() },
+            EventKind::TokenDelta(text) => UiEventKind::TokenDelta { text: text.clone() },
+            EventKind::ToolCallRequested { call_id, name, arguments } => UiEventKind::ToolCallRequested {
                 call_id: call_id.clone(),
                 name: name.clone(),
                 arguments: arguments.clone(),
             },
-            EventKind::ToolCallFinished { call_id, name, outcome } => UiEvent::ToolCallFinished {
+            EventKind::ToolCallFinished { call_id, name, outcome } => UiEventKind::ToolCallFinished {
                 call_id: call_id.clone(),
                 name: name.clone(),
                 outcome: outcome.content.clone(),
                 is_error: outcome.is_error,
             },
-            EventKind::ApprovalRequested { request_id, agent_id, tool_name, arguments } => {
-                UiEvent::ApprovalRequested {
-                    request_id: request_id.to_string(),
-                    agent_id: agent_id.clone(),
-                    tool_name: tool_name.clone(),
-                    arguments: arguments.clone(),
-                }
-            }
-            EventKind::ApprovalResolved { request_id, approved } => UiEvent::ApprovalResolved {
+            EventKind::ApprovalRequested { request_id, tool_name, arguments, .. } => UiEventKind::ApprovalRequested {
+                request_id: request_id.to_string(),
+                tool_name: tool_name.clone(),
+                arguments: arguments.clone(),
+            },
+            EventKind::ApprovalResolved { request_id, approved } => UiEventKind::ApprovalResolved {
                 request_id: request_id.to_string(),
                 approved: *approved,
             },
-            EventKind::AgentSpawned { agent_id, parent, spec_name } => UiEvent::AgentSpawned {
+            EventKind::AgentSpawned { agent_id, parent, spec_name } => UiEventKind::AgentSpawned {
                 agent_id: agent_id.clone(),
                 parent: parent.clone(),
                 spec_name: spec_name.clone(),
             },
             EventKind::OrchestratorTransition(d) => {
-                UiEvent::OrchestratorTransition { description: d.clone() }
+                UiEventKind::OrchestratorTransition { description: d.clone() }
             }
-            EventKind::RunFinished { summary, error } => UiEvent::RunFinished {
+            EventKind::RunFinished { summary, error } => UiEventKind::RunFinished {
                 summary: summary.clone(),
                 error: error.clone(),
             },
         };
-        Some((agent, payload))
+        Some(Self { agent_id: agent, kind })
     }
 }
 
@@ -128,13 +133,10 @@ fn spawn_event_forwarder(app: AppHandle, bus: EventBus) {
         loop {
             match rx.recv().await {
                 Ok(ev) => {
-                    if let Some((agent, payload)) = UiEvent::from_core(&ev) {
-                        let event_name = if agent.is_empty() {
-                            "luna://event".to_string()
-                        } else {
-                            format!("luna://event/{agent}")
-                        };
-                        let _ = app.emit(&event_name, payload);
+                    if let Some(payload) = UiEvent::from_core(&ev) {
+                        // Emit on the global channel; the payload carries
+                        // agent_id so the UI can route it.
+                        let _ = app.emit("luna://event", payload);
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -174,23 +176,23 @@ async fn luna_respond_approval(
     Ok(())
 }
 
-/// Run one agent turn end-to-end, streaming events to the webview.
-#[tauri::command]
-async fn luna_run_agent(
-    _app: AppHandle,
-    state: State<'_, LunaState>,
-    text: String,
-) -> Result<String, String> {
-    // Build the core stack (single enabled provider for now; orchestrator
-    // registry lands with multi-agent UI).
-    let cfg = luna_core::config::Config::load().map_err(|e| e.to_string())?;
-    let (provider_key, provider, settings) = pick_provider(&cfg).ok_or_else(|| {
+/// The shared core stack built once per run command.
+struct CoreStack {
+    provider: Arc<dyn luna_core::provider::Provider>,
+    registry: AgentRegistry,
+    tools: ToolRegistry,
+    default_spec: AgentSpec,
+}
+
+/// Build the provider + registry + tools stack shared by all run commands.
+fn build_stack(cfg: &luna_core::config::Config) -> Result<CoreStack, String> {
+    let (_key, provider, settings) = pick_provider(cfg).ok_or_else(|| {
         "no provider enabled: set ANTHROPIC_API_KEY / OPENAI_API_KEY or enable ollama in config.toml".to_string()
     })?;
 
     let mut registry = AgentRegistry::new();
     registry.register_provider(
-        &provider_key,
+        &_key,
         ProviderSettings {
             model: settings.0.clone(),
             max_tokens: settings.1,
@@ -203,8 +205,8 @@ async fn luna_run_agent(
     } else {
         AgentSpec {
             name: "assistant".into(),
-            provider_key: provider_key.clone(),
-            model: settings.0,
+            provider_key: _key.clone(),
+            model: settings.0.clone(),
             system: Some("You are Luna, a helpful coding agent.".into()),
             tools: vec![],
             max_iterations: 25,
@@ -216,7 +218,11 @@ async fn luna_run_agent(
     let mut tools = ToolRegistry::new();
     builtin::register_all(&mut tools);
 
-    let ctx = AgentContext {
+    Ok(CoreStack { provider, registry, tools, default_spec: spec })
+}
+
+fn build_ctx(state: &LunaState, provider: Arc<dyn luna_core::provider::Provider>, tools: ToolRegistry, cfg: &luna_core::config::Config) -> AgentContext {
+    AgentContext {
         provider,
         tools,
         gate: Arc::new(PermissionGate::new(
@@ -229,7 +235,19 @@ async fn luna_run_agent(
             pending: state.approvals.clone(),
             cancel: state.cancel.clone(),
         }),
-    };
+    }
+}
+
+/// Run one agent turn end-to-end, streaming events to the webview.
+#[tauri::command]
+async fn luna_run_agent(
+    _app: AppHandle,
+    state: State<'_, LunaState>,
+    text: String,
+) -> Result<String, String> {
+    let cfg = luna_core::config::Config::load().map_err(|e| e.to_string())?;
+    let stack = build_stack(&cfg)?;
+    let ctx = build_ctx(&state, stack.provider, stack.tools, &cfg);
 
     // Record the user message and run the loop.
     {
@@ -243,7 +261,7 @@ async fn luna_run_agent(
         .map_err(|e| e.to_string())?;
 
     let mut history = state.history.lock().unwrap().clone();
-    let runner = AgentRunner::new(spec);
+    let runner = AgentRunner::new(stack.default_spec);
     let cancel = state.cancel.clone();
     let result = runner.run(&ctx, &mut history, cancel).await;
     {
@@ -255,6 +273,69 @@ async fn luna_run_agent(
         Err(e) if e.is_cancelled() => Ok("(cancelled)".into()),
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// A multi-agent task request from the webview.
+#[derive(serde::Deserialize)]
+struct PlanRequest {
+    /// "single" | "fanout" | "supervised"
+    mode: String,
+    /// For single: the agent name. For supervised: the supervisor name.
+    agent: Option<String>,
+    /// (agent, task) pairs for fanout/supervised.
+    workers: Option<Vec<(String, String)>>,
+}
+
+/// Execute a multi-agent plan, streaming events to the webview.
+#[tauri::command]
+async fn luna_run_plan(
+    _app: AppHandle,
+    state: State<'_, LunaState>,
+    request: PlanRequest,
+) -> Result<PlanSummary, String> {
+    let cfg = luna_core::config::Config::load().map_err(|e| e.to_string())?;
+    let stack = build_stack(&cfg)?;
+    let ctx = build_ctx(&state, stack.provider, stack.tools, &cfg);
+
+    let plan = match request.mode.as_str() {
+        "single" => {
+            let agent = request.agent.ok_or("single plan requires `agent`")?;
+            let task = request
+                .workers
+                .and_then(|w| w.into_iter().next())
+                .map(|(_, t)| t)
+                .ok_or("single plan requires one worker task")?;
+            luna_core::orchestrator::runner::TaskPlan::Single { agent, task }
+        }
+        "fanout" => {
+            let workers = request.workers.ok_or("fanout plan requires `workers`")?;
+            luna_core::orchestrator::runner::TaskPlan::FanOut { agents: workers, join_prompt: None }
+        }
+        "supervised" => {
+            let supervisor = request.agent.ok_or("supervised plan requires `agent` (supervisor)")?;
+            let workers = request.workers.ok_or("supervised plan requires `workers`")?;
+            luna_core::orchestrator::runner::TaskPlan::Supervised { supervisor, workers }
+        }
+        other => return Err(format!("unknown plan mode `{other}`")),
+    };
+
+    let orch = luna_core::orchestrator::runner::Orchestrator::new(stack.registry, state.bus.clone());
+    let cancel = state.cancel.clone();
+    let result = orch
+        .execute(plan, &ctx, Arc::new(luna_core::orchestrator::agent_loop::AutoApprove), cancel)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(PlanSummary {
+        outputs: result.outputs,
+        errors: result.errors,
+    })
+}
+
+#[derive(serde::Serialize)]
+struct PlanSummary {
+    outputs: std::collections::HashMap<String, String>,
+    errors: std::collections::HashMap<String, String>,
 }
 
 /// Ensure `luna` (the TUI CLI) is runnable from a terminal.
@@ -304,7 +385,10 @@ impl CreationFlagsExt for std::process::Command {
 /// Resolved provider settings tuple: (model, max_tokens, temperature).
 type ProviderSettingsTuple = (String, u32, f32);
 
-fn pick_provider(cfg: &luna_core::config::Config) -> Option<(String, std::sync::Arc<dyn luna_core::provider::Provider>, ProviderSettingsTuple)> {    // Env-var API keys take precedence in provider selection order.
+fn pick_provider(
+    cfg: &luna_core::config::Config,
+) -> Option<(String, std::sync::Arc<dyn luna_core::provider::Provider>, ProviderSettingsTuple)> {
+    // Env-var API keys take precedence in provider selection order.
     if cfg.providers.anthropic.enabled
         && let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
             && let Ok(p) = luna_core::provider::anthropic::AnthropicProvider::new(key) {
@@ -386,7 +470,8 @@ fn main() {
             luna_send_message,
             luna_cancel,
             luna_respond_approval,
-            luna_run_agent
+            luna_run_agent,
+            luna_run_plan
         ])
         .run(tauri::generate_context!())
         .expect("error while running Luna");
