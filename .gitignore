@@ -1,0 +1,22 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Luna local state
+*.luna-session
+.env
+.env.*
+
+# Tauri generated schemas + sidecar binaries (CI-provided)
+crates/luna-gui/gen/
+crates/luna-gui/binaries/luna-*

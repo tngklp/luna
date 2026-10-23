@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-tui:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install aarch64 Linux cross toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+      - uses: Swatinem/rust-cache@v2
+      - name: Build TUI
+        run: cargo build --release -p luna-tui --target ${{ matrix.target }}
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czf ../../../luna-${{ matrix.target }}.tar.gz luna
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target/${{ matrix.target }}/release/luna.exe `
+            -DestinationPath luna-${{ matrix.target }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tui-${{ matrix.target }}
+          path: |
+            luna-*.tar.gz
+            luna-*.zip
+          if-no-files-found: error
+
+  build-gui:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build TUI CLI (sidecar)
+        run: cargo build --release -p luna-tui --target ${{ matrix.target }}
+      - name: Stage sidecar binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path crates/luna-gui/binaries | Out-Null
+          $ext = if ("${{ runner.os }}" -eq "Windows") { ".exe" } else { "" }
+          Copy-Item "target/${{ matrix.target }}/release/luna$ext" `
+            "crates/luna-gui/binaries/luna-${{ matrix.target }}$ext"
+      - name: Build frontend
+        working-directory: crates/luna-gui/ui
+        run: npm ci && npm run build
+      - name: Build GUI bundle
+        working-directory: crates/luna-gui
+        run: |
+          cargo install tauri-cli --version '^2' --locked
+          cargo tauri build --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-${{ matrix.target }}
+          path: |
+            crates/luna-gui/target/*/release/bundle/**/*.msi
+            crates/luna-gui/target/*/release/bundle/**/*.exe
+            crates/luna-gui/target/*/release/bundle/**/*.dmg
+            crates/luna-gui/target/*/release/bundle/**/*.app.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: [build-tui, build-gui]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

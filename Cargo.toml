@@ -1,0 +1,55 @@
+[workspace]
+resolver = "3"
+members = ["crates/luna-core", "crates/luna-tui", "crates/luna-gui"]
+
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+repository = "https://github.com/tngklp/luna"
+
+[workspace.dependencies]
+# async runtime & utilities
+tokio = { version = "1.54", features = ["full"] }
+tokio-util = "0.7"
+async-trait = "0.1"
+futures = "0.3"
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+
+# http / sse
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+eventsource-stream = "0.2"
+bytes = "1"
+
+# storage
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+# ui
+ratatui = "0.30"
+crossterm = "0.29"
+tauri = { version = "2.12", features = [] }
+tauri-build = "2.7"
+tauri-plugin-shell = "2.5"
+
+# observability & errors
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+
+# misc
+directories = "6"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+glob = "0.3"
+regex = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
