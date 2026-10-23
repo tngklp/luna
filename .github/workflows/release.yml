@@ -117,5 +117,10 @@ jobs:
           path: dist
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            dist/luna-*
+            dist/*/release/bundle/**/*.msi
+            dist/*/release/bundle/**/*.exe
+            dist/*/release/bundle/**/*.dmg
+            dist/*/release/bundle/**/*.app.tar.gz
           generate_release_notes: true
