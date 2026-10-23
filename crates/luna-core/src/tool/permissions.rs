@@ -310,9 +310,15 @@ mod tests {
 
         let gate = PermissionGate::new(vec![Rule::DenyPath { path: denied_root }], vec![]);
         let d = gate.evaluate("read_file", &json!({"path": denied_file.to_string_lossy()}));
-        assert!(matches!(d, Decision::Denied(_)), "expected denial, got {d:?}");
+        assert!(
+            matches!(d, Decision::Denied(_)),
+            "expected denial, got {d:?}"
+        );
         assert_eq!(
-            gate.evaluate("read_file", &json!({"path": allowed_file.to_string_lossy()})),
+            gate.evaluate(
+                "read_file",
+                &json!({"path": allowed_file.to_string_lossy()})
+            ),
             Decision::Allowed
         );
     }
