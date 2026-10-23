@@ -300,19 +300,19 @@ mod tests {
 
     #[test]
     fn path_rules() {
-        let gate = PermissionGate::new(
-            vec![Rule::DenyPath {
-                path: PathBuf::from("C:\\Windows"),
-            }],
-            vec![],
-        );
-        let d = gate.evaluate(
-            "read_file",
-            &json!({"path": "C:\\Windows\\system32\\config"}),
-        );
-        assert!(matches!(d, Decision::Denied(_)));
+        // Platform-agnostic roots: deny everything under temp_dir, allow
+        // everything under the current dir's parent.
+        let denied_root = std::env::temp_dir();
+        let denied_file = denied_root.join("luna-test-denied").join("config");
+        let allowed_file = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("allowed.txt");
+
+        let gate = PermissionGate::new(vec![Rule::DenyPath { path: denied_root }], vec![]);
+        let d = gate.evaluate("read_file", &json!({"path": denied_file.to_string_lossy()}));
+        assert!(matches!(d, Decision::Denied(_)), "expected denial, got {d:?}");
         assert_eq!(
-            gate.evaluate("read_file", &json!({"path": "C:\\Users\\tuna\\file.txt"})),
+            gate.evaluate("read_file", &json!({"path": allowed_file.to_string_lossy()})),
             Decision::Allowed
         );
     }
