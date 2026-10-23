@@ -28,6 +28,8 @@ pub struct LunaState {
     pub history: Mutex<Vec<Message>>,
     /// Pending approval resolvers, keyed by request id.
     pub approvals: Arc<Mutex<HashMap<uuid::Uuid, tokio::sync::oneshot::Sender<bool>>>>,
+    /// SQLite store for session persistence.
+    pub store: Arc<luna_core::storage::Store>,
 }
 
 /// Interactive approval sink: parks until the webview resolves the request.
@@ -217,6 +219,9 @@ fn build_stack(cfg: &luna_core::config::Config) -> Result<CoreStack, String> {
 
     let mut tools = ToolRegistry::new();
     builtin::register_all(&mut tools);
+    if let Ok(web) = luna_core::tool::web::WebFetch::new() {
+        tools.register(Arc::new(web));
+    }
 
     Ok(CoreStack { provider, registry, tools, default_spec: spec })
 }
@@ -338,6 +343,28 @@ struct PlanSummary {
     errors: std::collections::HashMap<String, String>,
 }
 
+/// List persisted sessions, most recent first.
+#[tauri::command]
+async fn luna_list_sessions(
+    state: State<'_, LunaState>,
+    limit: Option<u32>,
+) -> Result<Vec<luna_core::storage::SessionSummary>, String> {
+    state
+        .store
+        .list_sessions(limit.unwrap_or(20))
+        .map_err(|e| e.to_string())
+}
+
+/// Load a persisted session's events as UI events (for resume).
+#[tauri::command]
+async fn luna_load_session(
+    state: State<'_, LunaState>,
+    session_id: String,
+) -> Result<Vec<UiEvent>, String> {
+    let events = state.store.load_events(&session_id).map_err(|e| e.to_string())?;
+    Ok(events.iter().filter_map(UiEvent::from_core).collect())
+}
+
 /// Ensure `luna` (the TUI CLI) is runnable from a terminal.
 ///
 /// The GUI setup installs both binaries side by side; this shim adds the
@@ -428,6 +455,22 @@ fn main() {
     let cancel = CancellationToken::new();
     let session_id = uuid::Uuid::new_v4();
 
+    // SQLite persistence: data dir from config, store attached to the bus.
+    let store = {
+        let data_dir = luna_core::config::Config::load()
+            .map(|c| c.storage.data_dir)
+            .unwrap_or_else(|_| std::path::PathBuf::from(".luna"));
+        let path = data_dir.join("sessions.db");
+        match luna_core::storage::Store::open(&path) {
+            Ok(s) => Arc::new(s),
+            Err(e) => {
+                tracing::warn!(error = %e, "opening session store failed; persistence disabled");
+                Arc::new(luna_core::storage::Store::open_in_memory().expect("in-memory store"))
+            }
+        }
+    };
+    luna_core::storage::attach_store(&bus, store.clone());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(LunaState {
@@ -437,6 +480,7 @@ fn main() {
             session_id,
             history: Mutex::new(Vec::new()),
             approvals: Arc::new(Mutex::new(HashMap::new())),
+            store,
         })
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -471,7 +515,9 @@ fn main() {
             luna_cancel,
             luna_respond_approval,
             luna_run_agent,
-            luna_run_plan
+            luna_run_plan,
+            luna_list_sessions,
+            luna_load_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running Luna");

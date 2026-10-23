@@ -5,6 +5,7 @@ pub mod error;
 pub mod event;
 pub mod orchestrator;
 pub mod provider;
+pub mod storage;
 pub mod tool;
 
 pub use error::{Error, Result};

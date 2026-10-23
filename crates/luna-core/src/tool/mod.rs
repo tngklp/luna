@@ -3,5 +3,6 @@
 pub mod builtin;
 pub mod permissions;
 pub mod registry;
+pub mod web;
 
 pub use registry::{Tool, ToolOutcome, ToolRegistry};

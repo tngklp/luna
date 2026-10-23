@@ -84,8 +84,25 @@ fn run_app() -> anyhow_noop::Result<()> {
 
     let mut tools = ToolRegistry::new();
     builtin::register_all(&mut tools);
+    if let Ok(web) = luna_core::tool::web::WebFetch::new() {
+        tools.register(Arc::new(web));
+    }
 
     let bus = luna_core::EventBus::default();
+
+    // SQLite persistence (best-effort; failures degrade to no persistence).
+    let store = {
+        let path = cfg.storage.data_dir.join("sessions.db");
+        match luna_core::storage::Store::open(&path) {
+            Ok(s) => Arc::new(s),
+            Err(e) => {
+                tracing::warn!(error = %e, "opening session store failed; persistence disabled");
+                Arc::new(luna_core::storage::Store::open_in_memory().expect("in-memory store"))
+            }
+        }
+    };
+    luna_core::storage::attach_store(&bus, store);
+
     let ctx = AgentContext {
         provider,
         tools,
