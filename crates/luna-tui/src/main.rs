@@ -87,6 +87,16 @@ fn run_app() -> anyhow_noop::Result<()> {
     if let Ok(web) = luna_core::tool::web::WebFetch::new() {
         tools.register(Arc::new(web));
     }
+    // MCP servers connect before the terminal takes over (failures skipped).
+    if !cfg.mcp_servers.is_empty() {
+        let rt = tokio::runtime::Runtime::new()?;
+        let (ok, failed) = rt.block_on(async {
+            luna_core::tool::mcp::register_from_config(&mut tools, &cfg.mcp_servers).await
+        });
+        if ok + failed > 0 {
+            eprintln!("mcp: {ok} connected, {failed} failed");
+        }
+    }
 
     let bus = luna_core::EventBus::default();
 
@@ -147,7 +157,7 @@ fn pick_provider(cfg: &Config) -> Option<(String, Arc<dyn luna_core::provider::P
                 return Some(("openai".into(), Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
             }
     if cfg.providers.ollama.enabled
-        && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::ollama() {
+        && let Ok(p) = luna_core::provider::ollama::OllamaProvider::new(&cfg.providers.ollama.base_url) {
             let c = &cfg.providers.ollama;
             return Some(("ollama".into(), Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
         }

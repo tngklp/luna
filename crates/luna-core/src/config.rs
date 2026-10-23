@@ -16,6 +16,17 @@ pub struct Config {
     pub permissions: PermissionsConfig,
     #[serde(default)]
     pub storage: StorageConfig,
+    /// MCP servers to connect at startup: name → { command, args }.
+    #[serde(default)]
+    pub mcp_servers: std::collections::BTreeMap<String, McpServerConfig>,
+}
+
+/// One MCP stdio server definition.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,6 +242,11 @@ approval_tools = ["shell", "write_file"]
 
 [storage]
 data_dir = "C:\\Users\\Tuna\\AppData\\Local\\luna\\data"
+
+# MCP servers (stdio). Example:
+# [mcp_servers.filesystem]
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\Tuna\\Documents"]
 "#;
 
 #[cfg(test)]

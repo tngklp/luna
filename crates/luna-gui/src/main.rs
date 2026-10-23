@@ -187,7 +187,7 @@ struct CoreStack {
 }
 
 /// Build the provider + registry + tools stack shared by all run commands.
-fn build_stack(cfg: &luna_core::config::Config) -> Result<CoreStack, String> {
+async fn build_stack(cfg: &luna_core::config::Config) -> Result<CoreStack, String> {
     let (_key, provider, settings) = pick_provider(cfg).ok_or_else(|| {
         "no provider enabled: set ANTHROPIC_API_KEY / OPENAI_API_KEY or enable ollama in config.toml".to_string()
     })?;
@@ -222,6 +222,10 @@ fn build_stack(cfg: &luna_core::config::Config) -> Result<CoreStack, String> {
     if let Ok(web) = luna_core::tool::web::WebFetch::new() {
         tools.register(Arc::new(web));
     }
+    let (ok, failed) = luna_core::tool::mcp::register_from_config(&mut tools, &cfg.mcp_servers).await;
+    if failed > 0 {
+        tracing::warn!(connected = ok, failed, "mcp servers partially connected");
+    }
 
     Ok(CoreStack { provider, registry, tools, default_spec: spec })
 }
@@ -251,7 +255,7 @@ async fn luna_run_agent(
     text: String,
 ) -> Result<String, String> {
     let cfg = luna_core::config::Config::load().map_err(|e| e.to_string())?;
-    let stack = build_stack(&cfg)?;
+    let stack = build_stack(&cfg).await?;
     let ctx = build_ctx(&state, stack.provider, stack.tools, &cfg);
 
     // Record the user message and run the loop.
@@ -299,7 +303,7 @@ async fn luna_run_plan(
     request: PlanRequest,
 ) -> Result<PlanSummary, String> {
     let cfg = luna_core::config::Config::load().map_err(|e| e.to_string())?;
-    let stack = build_stack(&cfg)?;
+    let stack = build_stack(&cfg).await?;
     let ctx = build_ctx(&state, stack.provider, stack.tools, &cfg);
 
     let plan = match request.mode.as_str() {
@@ -429,7 +433,7 @@ fn pick_provider(
                 return Some(("openai".into(), std::sync::Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
             }
     if cfg.providers.ollama.enabled
-        && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::ollama() {
+        && let Ok(p) = luna_core::provider::ollama::OllamaProvider::new(&cfg.providers.ollama.base_url) {
             let c = &cfg.providers.ollama;
             return Some((
                 "ollama".into(),
