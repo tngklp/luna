@@ -26,7 +26,9 @@ impl Store {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
-        let store = Self { conn: std::sync::Mutex::new(conn) };
+        let store = Self {
+            conn: std::sync::Mutex::new(conn),
+        };
         store.migrate()?;
         Ok(store)
     }
@@ -34,16 +36,15 @@ impl Store {
     /// In-memory store for tests.
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
-        let store = Self { conn: std::sync::Mutex::new(conn) };
+        let store = Self {
+            conn: std::sync::Mutex::new(conn),
+        };
         store.migrate()?;
         Ok(store)
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .lock()
-            .unwrap()
-            .execute_batch(
+        self.conn.lock().unwrap().execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
@@ -123,14 +124,12 @@ impl Store {
                     started_at: row.get(1)?,
                     last_activity: row.get(2)?,
                     event_count: row.get(3)?,
-                    first_user_message: row
-                        .get::<_, Option<String>>(4)?
-                        .map(|p| {
-                            serde_json::from_str::<serde_json::Value>(&p)
-                                .ok()
-                                .and_then(|v| v["text"].as_str().map(str::to_string))
-                                .unwrap_or_else(|| p.chars().take(80).collect())
-                        }),
+                    first_user_message: row.get::<_, Option<String>>(4)?.map(|p| {
+                        serde_json::from_str::<serde_json::Value>(&p)
+                            .ok()
+                            .and_then(|v| v["text"].as_str().map(str::to_string))
+                            .unwrap_or_else(|| p.chars().take(80).collect())
+                    }),
                 })
             })
             .map_err(Error::Sqlite)?;
@@ -163,7 +162,8 @@ impl Store {
             let timestamp = chrono::DateTime::parse_from_rfc3339(&ts)
                 .map(|t| t.with_timezone(&chrono::Utc))
                 .unwrap_or_else(|_| chrono::Utc::now());
-            let session_id = uuid::Uuid::parse_str(session_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
+            let session_id =
+                uuid::Uuid::parse_str(session_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
             let event_kind = deserialize_kind(&kind, &payload);
             out.push(LunaEvent {
                 session_id,
@@ -219,8 +219,12 @@ fn deserialize_kind(kind: &str, payload: &str) -> EventKind {
     let v: serde_json::Value = serde_json::from_str(payload).unwrap_or(serde_json::Value::Null);
     match kind {
         "run_started" => EventKind::RunStarted,
-        "user_message" => EventKind::UserMessage(v["text"].as_str().unwrap_or_default().to_string()),
-        "assistant_message" => EventKind::AssistantMessage(v["text"].as_str().unwrap_or_default().to_string()),
+        "user_message" => {
+            EventKind::UserMessage(v["text"].as_str().unwrap_or_default().to_string())
+        }
+        "assistant_message" => {
+            EventKind::AssistantMessage(v["text"].as_str().unwrap_or_default().to_string())
+        }
         "token_delta" => EventKind::TokenDelta(v["text"].as_str().unwrap_or_default().to_string()),
         "tool_call_requested" => EventKind::ToolCallRequested {
             call_id: v["call_id"].as_str().unwrap_or_default().to_string(),
@@ -236,13 +240,19 @@ fn deserialize_kind(kind: &str, payload: &str) -> EventKind {
             },
         },
         "approval_requested" => EventKind::ApprovalRequested {
-            request_id: v["request_id"].as_str().and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_default(),
+            request_id: v["request_id"]
+                .as_str()
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .unwrap_or_default(),
             agent_id: v["agent_id"].as_str().unwrap_or_default().to_string(),
             tool_name: v["tool_name"].as_str().unwrap_or_default().to_string(),
             arguments: v["arguments"].clone(),
         },
         "approval_resolved" => EventKind::ApprovalResolved {
-            request_id: v["request_id"].as_str().and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_default(),
+            request_id: v["request_id"]
+                .as_str()
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .unwrap_or_default(),
             approved: v["approved"].as_bool().unwrap_or(false),
         },
         "agent_spawned" => EventKind::AgentSpawned {
@@ -250,9 +260,9 @@ fn deserialize_kind(kind: &str, payload: &str) -> EventKind {
             parent: v["parent"].as_str().map(str::to_string),
             spec_name: v["spec_name"].as_str().unwrap_or_default().to_string(),
         },
-        "orchestrator_transition" => {
-            EventKind::OrchestratorTransition(v["description"].as_str().unwrap_or_default().to_string())
-        }
+        "orchestrator_transition" => EventKind::OrchestratorTransition(
+            v["description"].as_str().unwrap_or_default().to_string(),
+        ),
         "run_finished" => EventKind::RunFinished {
             summary: v["summary"].as_str().map(str::to_string),
             error: v["error"].as_str().map(str::to_string),
@@ -295,7 +305,11 @@ mod tests {
         let sid = uuid::Uuid::new_v4();
         store.ensure_session(&sid.to_string()).unwrap();
         store
-            .record(&LunaEvent::new(sid, None, EventKind::UserMessage("hello".into())))
+            .record(&LunaEvent::new(
+                sid,
+                None,
+                EventKind::UserMessage("hello".into()),
+            ))
             .unwrap();
         store
             .record(&LunaEvent::new(
@@ -309,20 +323,35 @@ mod tests {
             ))
             .unwrap();
         store
-            .record(&LunaEvent::new(sid, None, EventKind::RunFinished { summary: Some("done".into()), error: None }))
+            .record(&LunaEvent::new(
+                sid,
+                None,
+                EventKind::RunFinished {
+                    summary: Some("done".into()),
+                    error: None,
+                },
+            ))
             .unwrap();
 
         let events = store.load_events(&sid.to_string()).unwrap();
         assert_eq!(events.len(), 3);
         assert!(matches!(events[0].kind, EventKind::UserMessage(ref t) if t == "hello"));
         match &events[1].kind {
-            EventKind::ToolCallRequested { name, arguments, .. } => {
+            EventKind::ToolCallRequested {
+                name, arguments, ..
+            } => {
                 assert_eq!(name, "read_file");
                 assert_eq!(arguments["path"], "a.txt");
             }
             other => panic!("unexpected: {other:?}"),
         }
-        assert!(matches!(events[2].kind, EventKind::RunFinished { summary: Some(_), error: None }));
+        assert!(matches!(
+            events[2].kind,
+            EventKind::RunFinished {
+                summary: Some(_),
+                error: None
+            }
+        ));
     }
 
     #[test]
@@ -330,9 +359,21 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let s1 = uuid::Uuid::new_v4();
         let s2 = uuid::Uuid::new_v4();
-        store.record(&LunaEvent::new(s1, None, EventKind::UserMessage("first".into()))).unwrap();
+        store
+            .record(&LunaEvent::new(
+                s1,
+                None,
+                EventKind::UserMessage("first".into()),
+            ))
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        store.record(&LunaEvent::new(s2, None, EventKind::UserMessage("second".into()))).unwrap();
+        store
+            .record(&LunaEvent::new(
+                s2,
+                None,
+                EventKind::UserMessage("second".into()),
+            ))
+            .unwrap();
 
         let sessions = store.list_sessions(10).unwrap();
         assert_eq!(sessions.len(), 2);
@@ -346,7 +387,11 @@ mod tests {
         let store = std::sync::Arc::new(Store::open_in_memory().unwrap());
         let handle = attach_store(&bus, store.clone());
         let sid = uuid::Uuid::new_v4();
-        bus.publish(LunaEvent::new(sid, None, EventKind::UserMessage("via bus".into())));
+        bus.publish(LunaEvent::new(
+            sid,
+            None,
+            EventKind::UserMessage("via bus".into()),
+        ));
         // Give the forwarder a moment.
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         handle.abort();

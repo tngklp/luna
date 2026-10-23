@@ -1,12 +1,14 @@
 //! Anthropic Messages API provider (streaming, tool use).
 
-use super::types::{CompletionRequest, ContentBlock, Message, Role, StopReason, StreamChunk, ToolSpec};
 use super::Provider;
+use super::types::{
+    CompletionRequest, ContentBlock, Message, Role, StopReason, StreamChunk, ToolSpec,
+};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use eventsource_stream::Eventsource;
 use futures::{Stream, StreamExt};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::pin::Pin;
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -46,7 +48,11 @@ impl AnthropicProvider {
                     ContentBlock::ToolUse { id, name, input } => {
                         json!({ "type": "tool_use", "id": id, "name": name, "input": input })
                     }
-                    ContentBlock::ToolResult { tool_use_id, content, is_error } => json!({
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        is_error,
+                    } => json!({
                         "type": "tool_result",
                         "tool_use_id": tool_use_id,
                         "content": content,
@@ -129,13 +135,17 @@ impl Provider for AnthropicProvider {
             let cancel = cancel.clone();
             async move {
                 if cancel.is_cancelled() {
-                    return Some(StreamChunk::Done { stop_reason: StopReason::Cancelled });
+                    return Some(StreamChunk::Done {
+                        stop_reason: StopReason::Cancelled,
+                    });
                 }
                 match item {
                     Ok(ev) => parse_sse_event(&ev.data),
                     Err(e) => {
                         tracing::warn!(error = %e, "anthropic sse decode error");
-                        Some(StreamChunk::Done { stop_reason: StopReason::EndTurn })
+                        Some(StreamChunk::Done {
+                            stop_reason: StopReason::EndTurn,
+                        })
                     }
                 }
             }
@@ -193,14 +203,24 @@ fn parse_sse_event(data: &str) -> Option<StreamChunk> {
             let usage = &v["usage"];
             let _ = usage;
             match stop {
-                Some("tool_use") => Some(StreamChunk::Done { stop_reason: StopReason::ToolUse }),
-                Some("max_tokens") => Some(StreamChunk::Done { stop_reason: StopReason::MaxTokens }),
-                Some("end_turn") | None => Some(StreamChunk::Done { stop_reason: StopReason::EndTurn }),
-                _ => Some(StreamChunk::Done { stop_reason: StopReason::EndTurn }),
+                Some("tool_use") => Some(StreamChunk::Done {
+                    stop_reason: StopReason::ToolUse,
+                }),
+                Some("max_tokens") => Some(StreamChunk::Done {
+                    stop_reason: StopReason::MaxTokens,
+                }),
+                Some("end_turn") | None => Some(StreamChunk::Done {
+                    stop_reason: StopReason::EndTurn,
+                }),
+                _ => Some(StreamChunk::Done {
+                    stop_reason: StopReason::EndTurn,
+                }),
             }
         }
         Some("message_stop") => None, // Done already emitted by message_delta
-        Some("error") => Some(StreamChunk::Done { stop_reason: StopReason::EndTurn }),
+        Some("error") => Some(StreamChunk::Done {
+            stop_reason: StopReason::EndTurn,
+        }),
         _ => None,
     }
 }
@@ -234,7 +254,9 @@ mod tests {
     fn parses_stop_reasons() {
         let data = r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"}}"#;
         match parse_sse_event(data) {
-            Some(StreamChunk::Done { stop_reason: StopReason::ToolUse }) => {}
+            Some(StreamChunk::Done {
+                stop_reason: StopReason::ToolUse,
+            }) => {}
             other => panic!("unexpected: {other:?}"),
         }
     }

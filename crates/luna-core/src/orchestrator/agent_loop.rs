@@ -2,8 +2,8 @@
 
 use crate::error::{Error, Result};
 use crate::event::{EventKind, LunaEvent};
-use crate::provider::types::{CompletionRequest, ContentBlock, Message, StopReason, StreamChunk};
 use crate::provider::Provider;
+use crate::provider::types::{CompletionRequest, ContentBlock, Message, StopReason, StreamChunk};
 use crate::tool::permissions::{Decision, PermissionGate};
 use crate::tool::registry::ToolRegistry;
 use std::sync::Arc;
@@ -118,7 +118,11 @@ impl AgentRunner {
         cancel: CancellationToken,
     ) -> Result<String> {
         let agent_id = self.spec.name.clone();
-        ctx.bus.publish(LunaEvent::new(ctx.session_id, Some(agent_id.clone()), EventKind::RunStarted));
+        ctx.bus.publish(LunaEvent::new(
+            ctx.session_id,
+            Some(agent_id.clone()),
+            EventKind::RunStarted,
+        ));
 
         let mut iterations: u32 = 0;
         let mut final_text = String::new();
@@ -128,7 +132,10 @@ impl AgentRunner {
                 ctx.bus.publish(LunaEvent::new(
                     ctx.session_id,
                     Some(agent_id.clone()),
-                    EventKind::RunFinished { summary: None, error: Some("cancelled".into()) },
+                    EventKind::RunFinished {
+                        summary: None,
+                        error: Some("cancelled".into()),
+                    },
                 ));
                 return Err(Error::Cancelled);
             }
@@ -138,7 +145,10 @@ impl AgentRunner {
                 ctx.bus.publish(LunaEvent::new(
                     ctx.session_id,
                     Some(agent_id.clone()),
-                    EventKind::RunFinished { summary: None, error: Some(e.to_string()) },
+                    EventKind::RunFinished {
+                        summary: None,
+                        error: Some(e.to_string()),
+                    },
                 ));
                 return Err(e);
             }
@@ -153,7 +163,10 @@ impl AgentRunner {
             };
 
             // One streaming turn.
-            let mut stream = ctx.provider.stream_completion(request, cancel.clone()).await?;
+            let mut stream = ctx
+                .provider
+                .stream_completion(request, cancel.clone())
+                .await?;
             let mut text = String::new();
             let mut tool_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
             let mut stop_reason = StopReason::EndTurn;
@@ -183,7 +196,10 @@ impl AgentRunner {
                 ctx.bus.publish(LunaEvent::new(
                     ctx.session_id,
                     Some(agent_id.clone()),
-                    EventKind::RunFinished { summary: None, error: Some("cancelled".into()) },
+                    EventKind::RunFinished {
+                        summary: None,
+                        error: Some("cancelled".into()),
+                    },
                 ));
                 return Err(Error::Cancelled);
             }
@@ -194,10 +210,17 @@ impl AgentRunner {
                 blocks.push(ContentBlock::Text { text: text.clone() });
             }
             for (id, name, input) in &tool_calls {
-                blocks.push(ContentBlock::ToolUse { id: id.clone(), name: name.clone(), input: input.clone() });
+                blocks.push(ContentBlock::ToolUse {
+                    id: id.clone(),
+                    name: name.clone(),
+                    input: input.clone(),
+                });
             }
             if !blocks.is_empty() {
-                history.push(Message { role: crate::provider::types::Role::Assistant, content: blocks });
+                history.push(Message {
+                    role: crate::provider::types::Role::Assistant,
+                    content: blocks,
+                });
             }
             if !text.is_empty() {
                 final_text = text.clone();
@@ -212,7 +235,10 @@ impl AgentRunner {
                 ctx.bus.publish(LunaEvent::new(
                     ctx.session_id,
                     Some(agent_id.clone()),
-                    EventKind::RunFinished { summary: Some(final_text.clone()), error: None },
+                    EventKind::RunFinished {
+                        summary: Some(final_text.clone()),
+                        error: None,
+                    },
                 ));
                 return Ok(final_text);
             }
@@ -228,7 +254,10 @@ impl AgentRunner {
                         ctx.bus.publish(LunaEvent::new(
                             ctx.session_id,
                             Some(agent_id.clone()),
-                            EventKind::RunFinished { summary: None, error: Some("cancelled".into()) },
+                            EventKind::RunFinished {
+                                summary: None,
+                                error: Some("cancelled".into()),
+                            },
                         ));
                         return Err(Error::Cancelled);
                     }
@@ -285,7 +314,10 @@ impl AgentRunner {
                 ctx.bus.publish(LunaEvent::new(
                     ctx.session_id,
                     Some(agent_id.to_string()),
-                    EventKind::ApprovalResolved { request_id, approved },
+                    EventKind::ApprovalResolved {
+                        request_id,
+                        approved,
+                    },
                 ));
                 if !approved {
                     return Ok(crate::tool::registry::ToolOutcome::err(
@@ -300,7 +332,7 @@ impl AgentRunner {
             None => {
                 return Ok(crate::tool::registry::ToolOutcome::err(format!(
                     "unknown tool `{name}`"
-                )))
+                )));
             }
         };
 
@@ -366,7 +398,10 @@ mod tests {
         let provider = Arc::new(MockProvider::new(vec![ScriptedTurn::Text("hello!".into())]));
         let ctx = ctx_with(provider, Arc::new(AutoApprove));
         let mut history = vec![Message::user("hi")];
-        let out = AgentRunner::new(spec()).run(&ctx, &mut history, CancellationToken::new()).await.unwrap();
+        let out = AgentRunner::new(spec())
+            .run(&ctx, &mut history, CancellationToken::new())
+            .await
+            .unwrap();
         assert_eq!(out, "hello!");
     }
 
@@ -389,7 +424,10 @@ mod tests {
         ]));
         let ctx = ctx_with(provider, Arc::new(AutoApprove));
         let mut history = vec![Message::user("read note.txt")];
-        let out = AgentRunner::new(spec()).run(&ctx, &mut history, CancellationToken::new()).await.unwrap();
+        let out = AgentRunner::new(spec())
+            .run(&ctx, &mut history, CancellationToken::new())
+            .await
+            .unwrap();
         assert!(out.contains("luna was here"));
         // history: user, assistant(tool_use), tool_result, assistant(final)
         assert_eq!(history.len(), 4);
@@ -407,12 +445,20 @@ mod tests {
         // DenyAll sink: shell needs approval (registry flag), user denies.
         let ctx = ctx_with(provider, Arc::new(DenyAll));
         let mut history = vec![Message::user("delete everything")];
-        let out = AgentRunner::new(spec()).run(&ctx, &mut history, CancellationToken::new()).await.unwrap();
+        let out = AgentRunner::new(spec())
+            .run(&ctx, &mut history, CancellationToken::new())
+            .await
+            .unwrap();
         assert!(out.contains("not doing that"));
         // The tool result fed back must be an error.
-        let tool_msg = history.iter().find(|m| m.role == crate::provider::types::Role::Tool).unwrap();
+        let tool_msg = history
+            .iter()
+            .find(|m| m.role == crate::provider::types::Role::Tool)
+            .unwrap();
         match &tool_msg.content[0] {
-            ContentBlock::ToolResult { is_error, content, .. } => {
+            ContentBlock::ToolResult {
+                is_error, content, ..
+            } => {
                 assert!(is_error);
                 assert!(content.contains("denied"));
             }
@@ -438,7 +484,10 @@ mod tests {
         ]));
         let ctx = ctx_with(provider, Arc::new(DenyAll));
         let mut history = vec![Message::user("write x.txt")];
-        let out = AgentRunner::new(spec()).run(&ctx, &mut history, CancellationToken::new()).await.unwrap();
+        let out = AgentRunner::new(spec())
+            .run(&ctx, &mut history, CancellationToken::new())
+            .await
+            .unwrap();
         assert!(out.contains("skipping"));
         assert!(!target.exists());
     }
@@ -451,11 +500,20 @@ mod tests {
             calls: vec![("c1".into(), "read_file".into(), json!({"path": "."}))],
         };
         let provider = Arc::new(MockProvider::new(vec![
-            turn.clone(), turn.clone(), turn.clone(), turn.clone(), turn.clone(), turn.clone(), turn,
+            turn.clone(),
+            turn.clone(),
+            turn.clone(),
+            turn.clone(),
+            turn.clone(),
+            turn.clone(),
+            turn,
         ]));
         let ctx = ctx_with(provider, Arc::new(AutoApprove));
         let mut history = vec![Message::user("loop forever")];
-        let err = AgentRunner::new(spec()).run(&ctx, &mut history, CancellationToken::new()).await.unwrap_err();
+        let err = AgentRunner::new(spec())
+            .run(&ctx, &mut history, CancellationToken::new())
+            .await
+            .unwrap_err();
         assert!(matches!(err, Error::MaxIterations(5)));
     }
 
@@ -471,13 +529,19 @@ mod tests {
                 &self,
                 _r: CompletionRequest,
                 cancel: CancellationToken,
-            ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = StreamChunk> + Send>>> {
+            ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = StreamChunk> + Send>>>
+            {
                 let stream = futures::stream::unfold((), move |()| {
                     let cancel = cancel.clone();
                     async move {
                         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                         if cancel.is_cancelled() {
-                            Some((StreamChunk::Done { stop_reason: StopReason::Cancelled }, ()))
+                            Some((
+                                StreamChunk::Done {
+                                    stop_reason: StopReason::Cancelled,
+                                },
+                                (),
+                            ))
                         } else {
                             Some((StreamChunk::TextDelta("x".into()), ()))
                         }
@@ -494,7 +558,10 @@ mod tests {
             c2.cancel();
         });
         let mut history = vec![Message::user("go")];
-        let err = AgentRunner::new(spec()).run(&ctx, &mut history, cancel).await.unwrap_err();
+        let err = AgentRunner::new(spec())
+            .run(&ctx, &mut history, cancel)
+            .await
+            .unwrap_err();
         assert!(err.is_cancelled());
     }
 

@@ -3,13 +3,15 @@
 //! Covers OpenAI (`https://api.openai.com/v1`) and any compatible endpoint,
 //! including Ollama (`http://localhost:11434/v1`).
 
-use super::types::{CompletionRequest, ContentBlock, Message, Role, StopReason, StreamChunk, ToolSpec};
 use super::Provider;
+use super::types::{
+    CompletionRequest, ContentBlock, Message, Role, StopReason, StreamChunk, ToolSpec,
+};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use eventsource_stream::Eventsource;
 use futures::{Stream, StreamExt};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::pin::Pin;
 
 pub struct OpenAiCompatProvider {
@@ -72,7 +74,12 @@ impl OpenAiCompatProvider {
             }
             if any_tool_result {
                 for b in &m.content {
-                    if let ContentBlock::ToolResult { tool_use_id, content: c, .. } = b {
+                    if let ContentBlock::ToolResult {
+                        tool_use_id,
+                        content: c,
+                        ..
+                    } = b
+                    {
                         out.push(json!({
                             "role": "tool",
                             "tool_call_id": tool_use_id,
@@ -160,18 +167,24 @@ impl Provider for OpenAiCompatProvider {
             let label = label.clone();
             async move {
                 if cancel.is_cancelled() {
-                    return Some(StreamChunk::Done { stop_reason: StopReason::Cancelled });
+                    return Some(StreamChunk::Done {
+                        stop_reason: StopReason::Cancelled,
+                    });
                 }
                 match item {
                     Ok(ev) => {
                         if ev.data == "[DONE]" {
-                            return Some(StreamChunk::Done { stop_reason: StopReason::EndTurn });
+                            return Some(StreamChunk::Done {
+                                stop_reason: StopReason::EndTurn,
+                            });
                         }
                         parse_sse_event(&ev.data, &label)
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "openai-compat sse decode error");
-                        Some(StreamChunk::Done { stop_reason: StopReason::EndTurn })
+                        Some(StreamChunk::Done {
+                            stop_reason: StopReason::EndTurn,
+                        })
                     }
                 }
             }
@@ -205,19 +218,23 @@ fn parse_sse_event(data: &str, label: &str) -> Option<StreamChunk> {
     let v: Value = serde_json::from_str(data).ok()?;
     if let Some(err_msg) = v["error"]["message"].as_str() {
         tracing::warn!(provider = label, %err_msg, "provider stream error");
-        return Some(StreamChunk::Done { stop_reason: StopReason::EndTurn });
+        return Some(StreamChunk::Done {
+            stop_reason: StopReason::EndTurn,
+        });
     }
     let choice = &v["choices"][0];
     let delta = &choice["delta"];
 
     if let Some(text) = delta["content"].as_str()
-        && !text.is_empty() {
-            return Some(StreamChunk::TextDelta(text.to_string()));
-        }
+        && !text.is_empty()
+    {
+        return Some(StreamChunk::TextDelta(text.to_string()));
+    }
 
     if let Some(calls) = delta["tool_calls"].as_array() {
         for call in calls {
-            if let (Some(id), Some(name)) = (call["id"].as_str(), call["function"]["name"].as_str()) {
+            if let (Some(id), Some(name)) = (call["id"].as_str(), call["function"]["name"].as_str())
+            {
                 let input: Value =
                     serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))
                         .unwrap_or_else(|_| json!({}));
@@ -272,7 +289,9 @@ mod tests {
     fn parses_finish_reasons() {
         let data = r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#;
         match parse_sse_event(data, "openai") {
-            Some(StreamChunk::Done { stop_reason: StopReason::ToolUse }) => {}
+            Some(StreamChunk::Done {
+                stop_reason: StopReason::ToolUse,
+            }) => {}
             other => panic!("unexpected: {other:?}"),
         }
     }

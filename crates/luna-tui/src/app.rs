@@ -1,10 +1,10 @@
 //! TUI application loop: input handling, event pumping, agent runs.
 
 use crate::ui;
+use luna_core::EventBus;
 use luna_core::event::{EventKind, LunaEvent};
 use luna_core::orchestrator::agent_loop::{AgentContext, AgentRunner, AgentSpec, ApprovalSink};
 use luna_core::provider::types::Message;
-use luna_core::EventBus;
 use ratatui::Terminal;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -15,7 +15,11 @@ use tokio_util::sync::CancellationToken;
 pub enum Line {
     User(String),
     Assistant(String),
-    Tool { name: String, detail: String, is_error: bool },
+    Tool {
+        name: String,
+        detail: String,
+        is_error: bool,
+    },
     Transition(String),
     Error(String),
     Status(String),
@@ -146,128 +150,142 @@ pub fn run(
 
         if crossterm::event::poll(std::time::Duration::from_millis(50))?
             && let crossterm::event::Event::Key(key) = crossterm::event::read()?
-                && key.kind == crossterm::event::KeyEventKind::Press {
-                    use crossterm::event::{KeyCode, KeyModifiers};
-                    match (key.code, key.modifiers) {
-                        (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                            cancel.cancel();
-                            app.should_quit = true;
-                        }
-                        (KeyCode::Char('d'), KeyModifiers::CONTROL) if app.running => {
-                            cancel.cancel();
-                        }
-                        (KeyCode::Tab, _) => {
-                            // Cycle focus: main → each agent → main.
-                            let ids: Vec<String> = {
-                                let mut v: Vec<String> = app.agents.keys().cloned().collect();
-                                v.sort();
-                                v
-                            };
-                            app.focus_agent = match &app.focus_agent {
-                                None => ids.first().cloned(),
-                                Some(cur) => {
-                                    let idx = ids.iter().position(|i| i == cur).map(|i| i + 1).unwrap_or(usize::MAX);
-                                    if idx < ids.len() { Some(ids[idx].clone()) } else { None }
-                                }
-                            };
-                        }
-                        (KeyCode::Esc, _) => {
-                            if let Some(p) = app.approval.take() {
-                                resolve(&pending_map, p.request_id, false);
-                            } else if !app.running {
-                                app.should_quit = true;
+            && key.kind == crossterm::event::KeyEventKind::Press
+        {
+            use crossterm::event::{KeyCode, KeyModifiers};
+            match (key.code, key.modifiers) {
+                (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                    cancel.cancel();
+                    app.should_quit = true;
+                }
+                (KeyCode::Char('d'), KeyModifiers::CONTROL) if app.running => {
+                    cancel.cancel();
+                }
+                (KeyCode::Tab, _) => {
+                    // Cycle focus: main → each agent → main.
+                    let ids: Vec<String> = {
+                        let mut v: Vec<String> = app.agents.keys().cloned().collect();
+                        v.sort();
+                        v
+                    };
+                    app.focus_agent = match &app.focus_agent {
+                        None => ids.first().cloned(),
+                        Some(cur) => {
+                            let idx = ids
+                                .iter()
+                                .position(|i| i == cur)
+                                .map(|i| i + 1)
+                                .unwrap_or(usize::MAX);
+                            if idx < ids.len() {
+                                Some(ids[idx].clone())
+                            } else {
+                                None
                             }
                         }
-                        // Approval shortcuts.
-                        (KeyCode::Char('y'), _) if app.approval.is_some() => {
-                            if let Some(p) = app.approval.take() {
-                                resolve(&pending_map, p.request_id, true);
-                            }
-                        }
-                        (KeyCode::Char('n'), _) if app.approval.is_some() => {
-                            if let Some(p) = app.approval.take() {
-                                resolve(&pending_map, p.request_id, false);
-                            }
-                        }
-                        (KeyCode::Enter, _) if app.approval.is_some() => {
-                            if let Some(p) = app.approval.take() {
-                                resolve(&pending_map, p.request_id, true);
-                            }
-                        }
-                        (KeyCode::Enter, _) if !app.running => {
-                            let text = app.input.trim().to_string();
-                            app.input.clear();
-                            if !text.is_empty() {
-                                app.push(Line::User(text.clone()));
-                                app.running = true;
-                                app.status = "running…".into();
-
-                                let ctx2 = clone_ctx(&ctx);
-                                let spec2 = spec.clone();
-                                let cancel2 = cancel.clone();
-                                let history2 = history.clone();
-                                let (done_tx, done_rx) = std::sync::mpsc::channel::<Result<String, String>>();
-                                history2.lock().unwrap().push(Message::user(text));
-                                let history3 = history2.clone();
-                                std::thread::spawn(move || {
-                                    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-                                    let out = rt.block_on(async move {
-                                        let mut hist = history3.lock().unwrap().clone();
-                                        let runner = AgentRunner::new(spec2);
-                                        let res = runner.run(&ctx2, &mut hist, cancel2).await;
-                                        *history3.lock().unwrap() = hist;
-                                        res.map_err(|e| e.to_string())
-                                    });
-                                    let _ = done_tx.send(out);
-                                });
-
-                                // Keep drawing while the run goes.
-                                loop {
-                                    terminal.draw(|f| ui::draw(f, &app))?;
-                                    if done_rx.recv_timeout(std::time::Duration::from_millis(50)).is_ok() {
-                                        break;
-                                    }
-                                    while let Ok(ev) = rx.try_recv() {
-                                        absorb(&mut app, &ev);
-                                    }
-                                    if crossterm::event::poll(std::time::Duration::from_millis(0))?
-                                        && let crossterm::event::Event::Key(k) = crossterm::event::read()?
-                                            && k.kind == crossterm::event::KeyEventKind::Press {
-                                                use crossterm::event::{KeyCode as K, KeyModifiers as M};
-                                                match (k.code, k.modifiers) {
-                                                    (K::Char('d'), m) if m.contains(M::CONTROL) => cancel.cancel(),
-                                                    (K::Char('c'), m) if m.contains(M::CONTROL) => {
-                                                        cancel.cancel();
-                                                        app.should_quit = true;
-                                                    }
-                                                    (K::Char('y'), _) | (K::Enter, _) => {
-                                                        if let Some(p) = app.approval.take() {
-                                                            resolve(&pending_map, p.request_id, true);
-                                                        }
-                                                    }
-                                                    (K::Char('n'), _) | (K::Esc, _) => {
-                                                        if let Some(p) = app.approval.take() {
-                                                            resolve(&pending_map, p.request_id, false);
-                                                        }
-                                                    }
-                                                    _ => {}
-                                                }
-                                            }
-                                }
-
-                                app.running = false;
-                                app.status = "idle".into();
-                            }
-                        }
-                        (KeyCode::Backspace, _) => {
-                            app.input.pop();
-                        }
-                        (KeyCode::Char(c), _) => {
-                            app.input.push(c);
-                        }
-                        _ => {}
+                    };
+                }
+                (KeyCode::Esc, _) => {
+                    if let Some(p) = app.approval.take() {
+                        resolve(&pending_map, p.request_id, false);
+                    } else if !app.running {
+                        app.should_quit = true;
                     }
                 }
+                // Approval shortcuts.
+                (KeyCode::Char('y'), _) if app.approval.is_some() => {
+                    if let Some(p) = app.approval.take() {
+                        resolve(&pending_map, p.request_id, true);
+                    }
+                }
+                (KeyCode::Char('n'), _) if app.approval.is_some() => {
+                    if let Some(p) = app.approval.take() {
+                        resolve(&pending_map, p.request_id, false);
+                    }
+                }
+                (KeyCode::Enter, _) if app.approval.is_some() => {
+                    if let Some(p) = app.approval.take() {
+                        resolve(&pending_map, p.request_id, true);
+                    }
+                }
+                (KeyCode::Enter, _) if !app.running => {
+                    let text = app.input.trim().to_string();
+                    app.input.clear();
+                    if !text.is_empty() {
+                        app.push(Line::User(text.clone()));
+                        app.running = true;
+                        app.status = "running…".into();
+
+                        let ctx2 = clone_ctx(&ctx);
+                        let spec2 = spec.clone();
+                        let cancel2 = cancel.clone();
+                        let history2 = history.clone();
+                        let (done_tx, done_rx) =
+                            std::sync::mpsc::channel::<Result<String, String>>();
+                        history2.lock().unwrap().push(Message::user(text));
+                        let history3 = history2.clone();
+                        std::thread::spawn(move || {
+                            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+                            let out = rt.block_on(async move {
+                                let mut hist = history3.lock().unwrap().clone();
+                                let runner = AgentRunner::new(spec2);
+                                let res = runner.run(&ctx2, &mut hist, cancel2).await;
+                                *history3.lock().unwrap() = hist;
+                                res.map_err(|e| e.to_string())
+                            });
+                            let _ = done_tx.send(out);
+                        });
+
+                        // Keep drawing while the run goes.
+                        loop {
+                            terminal.draw(|f| ui::draw(f, &app))?;
+                            if done_rx
+                                .recv_timeout(std::time::Duration::from_millis(50))
+                                .is_ok()
+                            {
+                                break;
+                            }
+                            while let Ok(ev) = rx.try_recv() {
+                                absorb(&mut app, &ev);
+                            }
+                            if crossterm::event::poll(std::time::Duration::from_millis(0))?
+                                && let crossterm::event::Event::Key(k) = crossterm::event::read()?
+                                && k.kind == crossterm::event::KeyEventKind::Press
+                            {
+                                use crossterm::event::{KeyCode as K, KeyModifiers as M};
+                                match (k.code, k.modifiers) {
+                                    (K::Char('d'), m) if m.contains(M::CONTROL) => cancel.cancel(),
+                                    (K::Char('c'), m) if m.contains(M::CONTROL) => {
+                                        cancel.cancel();
+                                        app.should_quit = true;
+                                    }
+                                    (K::Char('y'), _) | (K::Enter, _) => {
+                                        if let Some(p) = app.approval.take() {
+                                            resolve(&pending_map, p.request_id, true);
+                                        }
+                                    }
+                                    (K::Char('n'), _) | (K::Esc, _) => {
+                                        if let Some(p) = app.approval.take() {
+                                            resolve(&pending_map, p.request_id, false);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+
+                        app.running = false;
+                        app.status = "idle".into();
+                    }
+                }
+                (KeyCode::Backspace, _) => {
+                    app.input.pop();
+                }
+                (KeyCode::Char(c), _) => {
+                    app.input.push(c);
+                }
+                _ => {}
+            }
+        }
 
         if app.should_quit {
             cancel.cancel();
@@ -297,7 +315,9 @@ fn absorb(app: &mut App, ev: &LunaEvent) {
                 _ => app.push(Line::Assistant(t.clone())),
             }
         }
-        EventKind::ToolCallRequested { name, arguments, .. } => {
+        EventKind::ToolCallRequested {
+            name, arguments, ..
+        } => {
             if let Some(a) = &ev.agent_id {
                 app.touch_agent(a).tool_calls += 1;
                 app.touch_agent(a).status = format!("tool: {name}");
@@ -322,20 +342,30 @@ fn absorb(app: &mut App, ev: &LunaEvent) {
                 is_error: outcome.is_error,
             });
         }
-        EventKind::ApprovalRequested { request_id, tool_name, arguments, .. } => {
+        EventKind::ApprovalRequested {
+            request_id,
+            tool_name,
+            arguments,
+            ..
+        } => {
             app.approval = Some(PendingApproval {
                 request_id: *request_id,
                 tool_name: tool_name.clone(),
                 arguments: serde_json::to_string_pretty(arguments).unwrap_or_default(),
             });
         }
-        EventKind::AgentSpawned { agent_id, parent, .. } => {
+        EventKind::AgentSpawned {
+            agent_id, parent, ..
+        } => {
             let st = app.touch_agent(agent_id);
             st.parent = parent.clone();
             st.status = "spawned".into();
             app.push(Line::Transition(format!(
                 "spawned {agent_id}{}",
-                parent.as_ref().map(|p| format!(" (child of {p})")).unwrap_or_default()
+                parent
+                    .as_ref()
+                    .map(|p| format!(" (child of {p})"))
+                    .unwrap_or_default()
             )));
         }
         EventKind::OrchestratorTransition(d) => app.push(Line::Transition(d.clone())),
@@ -345,7 +375,11 @@ fn absorb(app: &mut App, ev: &LunaEvent) {
                 if let Some(s) = summary {
                     st.last_output = s.clone();
                 }
-                st.status = if error.is_some() { "failed".into() } else { "done".into() };
+                st.status = if error.is_some() {
+                    "failed".into()
+                } else {
+                    "done".into()
+                };
             }
             if let Some(e) = error {
                 if e != "cancelled" {

@@ -67,7 +67,13 @@ impl MailboxTx {
     }
 
     /// Deliver a message; errors only if the receiver was dropped.
-    pub async fn send(&self, from: &str, kind: MessageKind, body: impl Into<String>, data: Option<Value>) -> Result<(), String> {
+    pub async fn send(
+        &self,
+        from: &str,
+        kind: MessageKind,
+        body: impl Into<String>,
+        data: Option<Value>,
+    ) -> Result<(), String> {
         let msg = AgentMessage {
             id: uuid::Uuid::new_v4(),
             from: from.to_string(),
@@ -127,12 +133,18 @@ impl MessageHub {
     /// Create a mailbox for `agent_id`; returns (rx handle, tx handle).
     pub fn register(&self, agent_id: &str) -> (Mailbox, MailboxTx) {
         let (tx, rx) = mpsc::channel(256);
-        let tx_handle = MailboxTx { agent_id: agent_id.to_string(), tx };
+        let tx_handle = MailboxTx {
+            agent_id: agent_id.to_string(),
+            tx,
+        };
         let rx_handle = Mailbox {
             agent_id: agent_id.to_string(),
             rx: Arc::new(tokio::sync::Mutex::new(rx)),
         };
-        self.boxes.lock().unwrap().insert(agent_id.to_string(), tx_handle.clone());
+        self.boxes
+            .lock()
+            .unwrap()
+            .insert(agent_id.to_string(), tx_handle.clone());
         (rx_handle, tx_handle)
     }
 
@@ -182,7 +194,10 @@ impl MessageHub {
     // ----- scratchpad -----
 
     pub fn scratch_set(&self, key: impl Into<String>, value: impl Into<String>) {
-        self.scratchpad.lock().unwrap().insert(key.into(), value.into());
+        self.scratchpad
+            .lock()
+            .unwrap()
+            .insert(key.into(), value.into());
     }
 
     pub fn scratch_get(&self, key: &str) -> Option<String> {
@@ -191,14 +206,23 @@ impl MessageHub {
 
     /// Full scratchpad snapshot (for injecting into a supervisor prompt).
     pub fn scratch_snapshot(&self) -> Vec<(String, String)> {
-        let mut v: Vec<(String, String)> = self.scratchpad.lock().unwrap().clone().into_iter().collect();
+        let mut v: Vec<(String, String)> = self
+            .scratchpad
+            .lock()
+            .unwrap()
+            .clone()
+            .into_iter()
+            .collect();
         v.sort();
         v
     }
 }
 
 /// Aggregate worker outputs into a supervisor-ready summary block.
-pub fn aggregate_results(results: &HashMap<String, String>, errors: &HashMap<String, String>) -> String {
+pub fn aggregate_results(
+    results: &HashMap<String, String>,
+    errors: &HashMap<String, String>,
+) -> String {
     let mut names: Vec<&String> = results.keys().chain(errors.keys()).collect();
     names.sort();
     let mut out = String::from("## Worker results\n");
@@ -213,7 +237,11 @@ pub fn aggregate_results(results: &HashMap<String, String>, errors: &HashMap<Str
 }
 
 /// Publish a message event on the bus for UI visibility.
-pub fn publish_message_event(bus: &crate::event::EventBus, session_id: uuid::Uuid, msg: &AgentMessage) {
+pub fn publish_message_event(
+    bus: &crate::event::EventBus,
+    session_id: uuid::Uuid,
+    msg: &AgentMessage,
+) {
     bus.publish(LunaEvent::new(
         session_id,
         Some(msg.to.clone()),
@@ -222,7 +250,11 @@ pub fn publish_message_event(bus: &crate::event::EventBus, session_id: uuid::Uui
             msg.kind.as_str(),
             msg.from,
             msg.to,
-            if msg.body.len() > 120 { format!("{}…", &msg.body[..120]) } else { msg.body.clone() }
+            if msg.body.len() > 120 {
+                format!("{}…", &msg.body[..120])
+            } else {
+                msg.body.clone()
+            }
         )),
     ));
 }
@@ -258,7 +290,9 @@ mod tests {
     #[tokio::test]
     async fn unknown_mailbox_errors() {
         let hub = MessageHub::new();
-        let err = hub.send_to("ghost", "a", MessageKind::Note, "x", None).await;
+        let err = hub
+            .send_to("ghost", "a", MessageKind::Note, "x", None)
+            .await;
         assert!(err.is_err());
     }
 

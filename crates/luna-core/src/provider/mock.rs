@@ -1,7 +1,7 @@
 //! Scripted mock provider for deterministic, network-free tests.
 
-use super::types::{CompletionRequest, StopReason, StreamChunk};
 use super::Provider;
+use super::types::{CompletionRequest, StopReason, StreamChunk};
 use crate::error::Result;
 use async_trait::async_trait;
 use futures::Stream;
@@ -14,7 +14,10 @@ pub enum ScriptedTurn {
     /// Stream this text, then stop.
     Text(String),
     /// Stream text, then request these tool calls, then stop with ToolUse.
-    ToolCalls { text: String, calls: Vec<(String, String, serde_json::Value)> },
+    ToolCalls {
+        text: String,
+        calls: Vec<(String, String, serde_json::Value)>,
+    },
 }
 
 pub struct MockProvider {
@@ -53,8 +56,13 @@ impl Provider for MockProvider {
         let chunks: Vec<StreamChunk> = match turn {
             Some(ScriptedTurn::Text(text)) => vec![
                 StreamChunk::TextDelta(text),
-                StreamChunk::Usage { input_tokens: 10, output_tokens: 5 },
-                StreamChunk::Done { stop_reason: StopReason::EndTurn },
+                StreamChunk::Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                },
+                StreamChunk::Done {
+                    stop_reason: StopReason::EndTurn,
+                },
             ],
             Some(ScriptedTurn::ToolCalls { text, calls }) => {
                 let mut chunks = Vec::new();
@@ -64,13 +72,20 @@ impl Provider for MockProvider {
                 for (id, name, input) in calls {
                     chunks.push(StreamChunk::ToolUse { id, name, input });
                 }
-                chunks.push(StreamChunk::Usage { input_tokens: 10, output_tokens: 5 });
-                chunks.push(StreamChunk::Done { stop_reason: StopReason::ToolUse });
+                chunks.push(StreamChunk::Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                });
+                chunks.push(StreamChunk::Done {
+                    stop_reason: StopReason::ToolUse,
+                });
                 chunks
             }
             None => vec![
                 StreamChunk::TextDelta("(mock exhausted)".into()),
-                StreamChunk::Done { stop_reason: StopReason::EndTurn },
+                StreamChunk::Done {
+                    stop_reason: StopReason::EndTurn,
+                },
             ],
         };
         Ok(Box::pin(futures::stream::iter(chunks)))

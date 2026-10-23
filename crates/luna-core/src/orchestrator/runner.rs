@@ -1,7 +1,7 @@
 //! The orchestrator: delegation, parallel fan-out with join, run tracking.
 
 use super::agent_loop::{AgentContext, AgentRunner, AgentSpec, ApprovalSink};
-use super::messaging::{aggregate_results, MessageHub, MessageKind};
+use super::messaging::{MessageHub, MessageKind, aggregate_results};
 use super::registry::AgentRegistry;
 use crate::error::Result;
 use crate::event::{EventKind, LunaEvent};
@@ -16,9 +16,15 @@ pub enum TaskPlan {
     /// One agent handles the task end-to-end.
     Single { agent: String, task: String },
     /// A supervisor delegates to workers and synthesizes results.
-    Supervised { supervisor: String, workers: Vec<(String, String)> },
+    Supervised {
+        supervisor: String,
+        workers: Vec<(String, String)>,
+    },
     /// Run the same/different agents in parallel and join results.
-    FanOut { agents: Vec<(String, String)>, join_prompt: Option<String> },
+    FanOut {
+        agents: Vec<(String, String)>,
+        join_prompt: Option<String>,
+    },
 }
 
 /// Result of one orchestrated run.
@@ -36,7 +42,14 @@ impl std::fmt::Debug for MessageHub {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MessageHub")
             .field("agents", &self.agent_ids())
-            .field("scratchpad_keys", &(self.scratch_snapshot().iter().map(|(k, _)| k.clone()).collect::<Vec<_>>()))
+            .field(
+                "scratchpad_keys",
+                &(self
+                    .scratch_snapshot()
+                    .iter()
+                    .map(|(k, _)| k.clone())
+                    .collect::<Vec<_>>()),
+            )
             .finish()
     }
 }
@@ -105,7 +118,10 @@ impl Orchestrator {
                 out.hub = hub;
                 Ok(out)
             }
-            TaskPlan::FanOut { agents, join_prompt: _ } => {
+            TaskPlan::FanOut {
+                agents,
+                join_prompt: _,
+            } => {
                 self.transition(format!("fan-out: {} agents", agents.len()));
                 let mut handles = Vec::new();
                 for (name, task) in agents {
@@ -114,14 +130,23 @@ impl Orchestrator {
                     let c = cancel.child_token();
                     let hub2 = hub.clone();
                     // Task arrives via the mailbox so it's visible to the hub.
-                    hub2
-                        .send_to(&spec.name, "orchestrator", MessageKind::Task, task.clone(), None)
-                        .await
-                        .ok();
+                    hub2.send_to(
+                        &spec.name,
+                        "orchestrator",
+                        MessageKind::Task,
+                        task.clone(),
+                        None,
+                    )
+                    .await
+                    .ok();
                     self.bus.publish(LunaEvent::new(
                         self.session_id,
                         Some(spec.name.clone()),
-                        EventKind::AgentSpawned { agent_id: spec.name.clone(), parent: None, spec_name: spec.name.clone() },
+                        EventKind::AgentSpawned {
+                            agent_id: spec.name.clone(),
+                            parent: None,
+                            spec_name: spec.name.clone(),
+                        },
                     ));
                     let agent_name = spec.name.clone();
                     handles.push(tokio::spawn(async move {
@@ -131,7 +156,11 @@ impl Orchestrator {
                         (agent_name, res, history)
                     }));
                 }
-                let mut result = RunResult { outputs: HashMap::new(), errors: HashMap::new(), hub };
+                let mut result = RunResult {
+                    outputs: HashMap::new(),
+                    errors: HashMap::new(),
+                    hub,
+                };
                 for h in handles {
                     match h.await {
                         Ok((name, Ok(text), _)) => {
@@ -141,16 +170,28 @@ impl Orchestrator {
                             result.errors.insert(name, e.to_string());
                         }
                         Err(e) => {
-                            result.errors.insert(format!("join-{e}"), format!("join error: {e}"));
+                            result
+                                .errors
+                                .insert(format!("join-{e}"), format!("join error: {e}"));
                         }
                     }
                 }
                 self.transition("fan-out joined");
                 Ok(result)
             }
-            TaskPlan::Supervised { supervisor, workers } => {
-                self.transition(format!("supervised: {} workers under {supervisor}", workers.len()));
-                let mut worker_results = RunResult { outputs: HashMap::new(), errors: HashMap::new(), hub: hub.clone() };
+            TaskPlan::Supervised {
+                supervisor,
+                workers,
+            } => {
+                self.transition(format!(
+                    "supervised: {} workers under {supervisor}",
+                    workers.len()
+                ));
+                let mut worker_results = RunResult {
+                    outputs: HashMap::new(),
+                    errors: HashMap::new(),
+                    hub: hub.clone(),
+                };
                 let mut handles = Vec::new();
                 for (name, task) in workers {
                     let spec = self.registry.resolve(&name)?;
@@ -158,14 +199,17 @@ impl Orchestrator {
                     let c = cancel.child_token();
                     let hub2 = hub.clone();
                     let sup = supervisor.clone();
-                    hub2
-                        .send_to(&spec.name, &sup, MessageKind::Task, task.clone(), None)
+                    hub2.send_to(&spec.name, &sup, MessageKind::Task, task.clone(), None)
                         .await
                         .ok();
                     self.bus.publish(LunaEvent::new(
                         self.session_id,
                         Some(spec.name.clone()),
-                        EventKind::AgentSpawned { agent_id: spec.name.clone(), parent: Some(supervisor.clone()), spec_name: spec.name.clone() },
+                        EventKind::AgentSpawned {
+                            agent_id: spec.name.clone(),
+                            parent: Some(supervisor.clone()),
+                            spec_name: spec.name.clone(),
+                        },
                     ));
                     let agent_name = spec.name.clone();
                     handles.push(tokio::spawn(async move {
@@ -184,7 +228,9 @@ impl Orchestrator {
                             worker_results.errors.insert(name, e.to_string());
                         }
                         Err(e) => {
-                            worker_results.errors.insert(format!("join-{e}"), format!("join error: {e}"));
+                            worker_results
+                                .errors
+                                .insert(format!("join-{e}"), format!("join error: {e}"));
                         }
                     }
                 }
@@ -218,7 +264,11 @@ impl Orchestrator {
         let runner = AgentRunner::new(spec.clone());
         let mut history = vec![Message::user(task)];
         let text = runner.run(&ctx, &mut history, cancel).await?;
-        let mut out = RunResult { outputs: HashMap::new(), errors: HashMap::new(), hub: MessageHub::new() };
+        let mut out = RunResult {
+            outputs: HashMap::new(),
+            errors: HashMap::new(),
+            hub: MessageHub::new(),
+        };
         out.outputs.insert(spec.name.clone(), text);
         Ok(out)
     }
@@ -247,8 +297,8 @@ mod tests {
     use super::*;
     use crate::event::EventKind as EK;
     use crate::orchestrator::agent_loop::AutoApprove;
-    use crate::provider::mock::{MockProvider, ScriptedTurn};
     use crate::provider::Provider;
+    use crate::provider::mock::{MockProvider, ScriptedTurn};
     use crate::tool::builtin;
     use crate::tool::permissions::PermissionGate;
     use crate::tool::registry::ToolRegistry;
@@ -270,7 +320,11 @@ mod tests {
         let mut reg = AgentRegistry::new();
         reg.register_provider(
             "mock",
-            super::super::registry::ProviderSettings { model: "mock-1".into(), max_tokens: 512, temperature: 0.0 },
+            super::super::registry::ProviderSettings {
+                model: "mock-1".into(),
+                max_tokens: 512,
+                temperature: 0.0,
+            },
         );
         reg.register_agent(crate::config::AgentSpecConfig {
             name: "alpha".into(),
@@ -293,13 +347,18 @@ mod tests {
 
     #[tokio::test]
     async fn single_agent_run() {
-        let provider = Arc::new(MockProvider::new(vec![ScriptedTurn::Text("done by alpha".into())]));
+        let provider = Arc::new(MockProvider::new(vec![ScriptedTurn::Text(
+            "done by alpha".into(),
+        )]));
         let ctx = base_ctx(provider);
         let bus = ctx.bus.clone();
         let orch = Orchestrator::new(registry_two_agents(), bus.clone());
         let res = orch
             .execute(
-                TaskPlan::Single { agent: "alpha".into(), task: "do it".into() },
+                TaskPlan::Single {
+                    agent: "alpha".into(),
+                    task: "do it".into(),
+                },
                 &ctx,
                 Arc::new(AutoApprove),
                 CancellationToken::new(),
@@ -322,7 +381,10 @@ mod tests {
         let res = orch
             .execute(
                 TaskPlan::FanOut {
-                    agents: vec![("alpha".into(), "task a".into()), ("beta".into(), "task b".into())],
+                    agents: vec![
+                        ("alpha".into(), "task a".into()),
+                        ("beta".into(), "task b".into()),
+                    ],
                     join_prompt: None,
                 },
                 &ctx,
@@ -332,7 +394,10 @@ mod tests {
             .await
             .unwrap();
         let joined = res.joined();
-        assert!(joined.contains("alpha-result") && joined.contains("beta-result"), "got: {joined}");
+        assert!(
+            joined.contains("alpha-result") && joined.contains("beta-result"),
+            "got: {joined}"
+        );
     }
 
     #[tokio::test]
@@ -358,7 +423,10 @@ mod tests {
             .execute(
                 TaskPlan::Supervised {
                     supervisor: "boss".into(),
-                    workers: vec![("alpha".into(), "task a".into()), ("beta".into(), "task b".into())],
+                    workers: vec![
+                        ("alpha".into(), "task a".into()),
+                        ("beta".into(), "task b".into()),
+                    ],
                 },
                 &ctx,
                 Arc::new(AutoApprove),
@@ -381,19 +449,35 @@ mod tests {
             // loop that trips the guard.
             ScriptedTurn::ToolCalls {
                 text: String::new(),
-                calls: vec![("c1".into(), "read_file".into(), serde_json::json!({"path": "."}))],
+                calls: vec![(
+                    "c1".into(),
+                    "read_file".into(),
+                    serde_json::json!({"path": "."}),
+                )],
             },
             ScriptedTurn::ToolCalls {
                 text: String::new(),
-                calls: vec![("c1".into(), "read_file".into(), serde_json::json!({"path": "."}))],
+                calls: vec![(
+                    "c1".into(),
+                    "read_file".into(),
+                    serde_json::json!({"path": "."}),
+                )],
             },
             ScriptedTurn::ToolCalls {
                 text: String::new(),
-                calls: vec![("c1".into(), "read_file".into(), serde_json::json!({"path": "."}))],
+                calls: vec![(
+                    "c1".into(),
+                    "read_file".into(),
+                    serde_json::json!({"path": "."}),
+                )],
             },
             ScriptedTurn::ToolCalls {
                 text: String::new(),
-                calls: vec![("c1".into(), "read_file".into(), serde_json::json!({"path": "."}))],
+                calls: vec![(
+                    "c1".into(),
+                    "read_file".into(),
+                    serde_json::json!({"path": "."}),
+                )],
             },
             ScriptedTurn::Text("synthesis despite failure".into()),
         ]));
@@ -422,7 +506,10 @@ mod tests {
             .execute(
                 TaskPlan::Supervised {
                     supervisor: "boss".into(),
-                    workers: vec![("alpha".into(), "task a".into()), ("beta".into(), "task b".into())],
+                    workers: vec![
+                        ("alpha".into(), "task a".into()),
+                        ("beta".into(), "task b".into()),
+                    ],
                 },
                 &ctx,
                 Arc::new(AutoApprove),
@@ -447,7 +534,10 @@ mod tests {
         let res = orch
             .execute(
                 TaskPlan::FanOut {
-                    agents: vec![("alpha".into(), "task a".into()), ("beta".into(), "task b".into())],
+                    agents: vec![
+                        ("alpha".into(), "task a".into()),
+                        ("beta".into(), "task b".into()),
+                    ],
                     join_prompt: None,
                 },
                 &ctx,
@@ -506,7 +596,10 @@ mod tests {
         let mut rx = bus.subscribe();
         let _ = orch
             .execute(
-                TaskPlan::Single { agent: "alpha".into(), task: "t".into() },
+                TaskPlan::Single {
+                    agent: "alpha".into(),
+                    task: "t".into(),
+                },
                 &ctx,
                 Arc::new(AutoApprove),
                 CancellationToken::new(),

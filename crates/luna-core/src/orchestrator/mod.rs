@@ -6,6 +6,6 @@ pub mod registry;
 pub mod runner;
 
 pub use agent_loop::{AgentContext, AgentRunner, AgentSpec, ApprovalSink, AutoApprove, DenyAll};
-pub use messaging::{aggregate_results, AgentMessage, MessageHub, MessageKind};
+pub use messaging::{AgentMessage, MessageHub, MessageKind, aggregate_results};
 pub use registry::AgentRegistry;
 pub use runner::Orchestrator;

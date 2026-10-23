@@ -1,10 +1,12 @@
 //! TUI rendering.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line as RLine, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
-use ratatui::Frame;
+use ratatui::widgets::{
+    Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+};
 
 use crate::app::{App, Line};
 pub fn draw(f: &mut Frame, app: &App) {
@@ -12,7 +14,8 @@ pub fn draw(f: &mut Frame, app: &App) {
     if app.agents.is_empty() {
         draw_main(f, app, f.area());
     } else {
-        let [sidebar, main] = Layout::horizontal([Constraint::Length(26), Constraint::Min(20)]).areas(f.area());
+        let [sidebar, main] =
+            Layout::horizontal([Constraint::Length(26), Constraint::Min(20)]).areas(f.area());
         draw_agent_sidebar(f, app, sidebar);
         draw_main(f, app, main);
     }
@@ -32,14 +35,28 @@ fn draw_main(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .iter()
         .map(|l| match l {
             Line::User(text) => RLine::from(vec![
-                Span::styled("you  ", Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "you  ",
+                    Style::default()
+                        .fg(Color::LightMagenta)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(text),
             ]),
             Line::Assistant(text) => RLine::from(vec![
-                Span::styled("luna ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "luna ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(text),
             ]),
-            Line::Tool { name, detail, is_error } => RLine::from(vec![
+            Line::Tool {
+                name,
+                detail,
+                is_error,
+            } => RLine::from(vec![
                 Span::styled(
                     "tool ",
                     Style::default().fg(if *is_error { Color::Red } else { Color::Green }),
@@ -81,8 +98,11 @@ fn draw_main(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 
     // Input pane.
-    let input = Paragraph::new(app.input.as_str())
-        .block(Block::default().borders(Borders::ALL).title(" message (Enter to send) "));
+    let input = Paragraph::new(app.input.as_str()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" message (Enter to send) "),
+    );
     f.render_widget(input, input_area);
     // Cursor at end of input.
     let x = (app.input.chars().count() as u16 + 1).min(input_area.width.saturating_sub(2));
@@ -95,9 +115,19 @@ fn draw_main(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Style::default().fg(Color::DarkGray)
     };
     let status = Paragraph::new(RLine::from(vec![
-        Span::styled(if app.running { "● running" } else { "○ idle" }, status_style),
+        Span::styled(
+            if app.running {
+                "● running"
+            } else {
+                "○ idle"
+            },
+            status_style,
+        ),
         Span::raw("  "),
-        Span::styled("Ctrl+C quit · Ctrl+D cancel · Tab agents", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            "Ctrl+C quit · Ctrl+D cancel · Tab agents",
+            Style::default().fg(Color::DarkGray),
+        ),
     ]));
     f.render_widget(status, status_area);
 
@@ -110,7 +140,9 @@ fn draw_main(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn draw_agent_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut lines: Vec<RLine> = vec![RLine::from(Span::styled(
         " AGENTS",
-        Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Magenta)
+            .add_modifier(Modifier::BOLD),
     ))];
     let mut ids: Vec<&String> = app.agents.keys().collect();
     ids.sort();
@@ -154,7 +186,8 @@ fn draw_agent_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Style::default().fg(Color::DarkGray),
     )));
 
-    let sidebar = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" run "));
+    let sidebar =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" run "));
     f.render_widget(sidebar, area);
 }
 
@@ -165,7 +198,9 @@ fn draw_approval_modal(f: &mut Frame, p: &crate::app::PendingApproval) {
         RLine::from(vec![
             Span::styled(
                 "Approval required: ",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(p.tool_name.clone(), Style::default().fg(Color::Yellow)),
         ]),
@@ -176,9 +211,17 @@ fn draw_approval_modal(f: &mut Frame, p: &crate::app::PendingApproval) {
         )),
         RLine::from(""),
         RLine::from(vec![
-            Span::styled("y", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "y",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("/Enter approve   "),
-            Span::styled("n", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "n",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::raw("/Esc deny"),
         ]),
     ];
@@ -194,7 +237,11 @@ fn draw_approval_modal(f: &mut Frame, p: &crate::app::PendingApproval) {
 }
 
 /// Rect centered in `r` with the given percentage size.
-fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+fn centered_rect(
+    percent_x: u16,
+    percent_y: u16,
+    r: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
     let popup = Layout::vertical([
         Constraint::Percentage((100 - percent_y) / 2),
         Constraint::Percentage(percent_y),

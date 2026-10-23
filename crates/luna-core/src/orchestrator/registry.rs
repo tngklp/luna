@@ -84,7 +84,11 @@ mod tests {
         let mut reg = AgentRegistry::new();
         reg.register_provider(
             "openai",
-            ProviderSettings { model: "gpt-5".into(), max_tokens: 4096, temperature: 0.5 },
+            ProviderSettings {
+                model: "gpt-5".into(),
+                max_tokens: 4096,
+                temperature: 0.5,
+            },
         );
         reg.register_agent(cfg("coder", "openai"));
         let spec = reg.resolve("coder").unwrap();

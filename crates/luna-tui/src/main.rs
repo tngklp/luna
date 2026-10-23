@@ -4,9 +4,9 @@ mod app;
 mod ui;
 
 use luna_core::config::Config;
+use luna_core::orchestrator::AgentRegistry;
 use luna_core::orchestrator::agent_loop::{AgentContext, AgentSpec, AutoApprove};
 use luna_core::orchestrator::registry::ProviderSettings;
-use luna_core::orchestrator::AgentRegistry;
 use luna_core::provider::types::Message;
 use luna_core::tool::builtin;
 use luna_core::tool::permissions::PermissionGate;
@@ -21,7 +21,10 @@ fn main() -> anyhow_noop::Result<()> {
             return Ok(());
         }
         Some("--help") | Some("-h") => {
-            println!("luna {} — Luna AI agent harness (TUI)", env!("CARGO_PKG_VERSION"));
+            println!(
+                "luna {} — Luna AI agent harness (TUI)",
+                env!("CARGO_PKG_VERSION")
+            );
             println!();
             println!("Usage: luna [OPTIONS]");
             println!();
@@ -64,7 +67,11 @@ fn run_app() -> anyhow_noop::Result<()> {
     let mut registry = AgentRegistry::new();
     registry.register_provider(
         &provider_key,
-        ProviderSettings { model: settings.0.clone(), max_tokens: settings.1, temperature: settings.2 },
+        ProviderSettings {
+            model: settings.0.clone(),
+            max_tokens: settings.1,
+            temperature: settings.2,
+        },
     );
     let spec = if let Some(agent_cfg) = cfg.agents.first() {
         registry.register_agent(agent_cfg.clone());
@@ -143,24 +150,46 @@ mod anyhow_noop {
 /// Resolved provider settings tuple: (model, max_tokens, temperature).
 pub type ProviderSettingsTuple = (String, u32, f32);
 
-fn pick_provider(cfg: &Config) -> Option<(String, Arc<dyn luna_core::provider::Provider>, ProviderSettingsTuple)> {
+fn pick_provider(
+    cfg: &Config,
+) -> Option<(
+    String,
+    Arc<dyn luna_core::provider::Provider>,
+    ProviderSettingsTuple,
+)> {
     if cfg.providers.anthropic.enabled
         && let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
-            && let Ok(p) = luna_core::provider::anthropic::AnthropicProvider::new(key) {
-                let c = &cfg.providers.anthropic;
-                return Some(("anthropic".into(), Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
-            }
+        && let Ok(p) = luna_core::provider::anthropic::AnthropicProvider::new(key)
+    {
+        let c = &cfg.providers.anthropic;
+        return Some((
+            "anthropic".into(),
+            Arc::new(p),
+            (c.model.clone(), c.max_tokens, c.temperature),
+        ));
+    }
     if cfg.providers.openai.enabled
         && let Ok(key) = std::env::var("OPENAI_API_KEY")
-            && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::openai(key) {
-                let c = &cfg.providers.openai;
-                return Some(("openai".into(), Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
-            }
+        && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::openai(key)
+    {
+        let c = &cfg.providers.openai;
+        return Some((
+            "openai".into(),
+            Arc::new(p),
+            (c.model.clone(), c.max_tokens, c.temperature),
+        ));
+    }
     if cfg.providers.ollama.enabled
-        && let Ok(p) = luna_core::provider::ollama::OllamaProvider::new(&cfg.providers.ollama.base_url) {
-            let c = &cfg.providers.ollama;
-            return Some(("ollama".into(), Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
-        }
+        && let Ok(p) =
+            luna_core::provider::ollama::OllamaProvider::new(&cfg.providers.ollama.base_url)
+    {
+        let c = &cfg.providers.ollama;
+        return Some((
+            "ollama".into(),
+            Arc::new(p),
+            (c.model.clone(), c.max_tokens, c.temperature),
+        ));
+    }
     None
 }
 
@@ -173,7 +202,13 @@ fn tracing_log_file() -> std::fs::File {
         .create(true)
         .append(true)
         .open(dir.join("luna-tui.log"))
-        .unwrap_or_else(|_| std::fs::OpenOptions::new().create(true).append(true).open("luna-tui.log").unwrap())
+        .unwrap_or_else(|_| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("luna-tui.log")
+                .unwrap()
+        })
 }
 
 fn tui_init() -> std::io::Result<ratatui::DefaultTerminal> {

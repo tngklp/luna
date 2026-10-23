@@ -6,7 +6,9 @@ pub mod ollama;
 pub mod openai_compat;
 pub mod types;
 
-pub use types::{CompletionRequest, ContentBlock, Message, Role, StopReason, StreamChunk, ToolSpec};
+pub use types::{
+    CompletionRequest, ContentBlock, Message, Role, StopReason, StreamChunk, ToolSpec,
+};
 
 use crate::error::Result;
 use async_trait::async_trait;

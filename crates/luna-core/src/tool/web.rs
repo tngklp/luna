@@ -3,7 +3,7 @@
 use super::registry::{Tool, ToolOutcome};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 const MAX_BODY_BYTES: usize = 2 * 1024 * 1024; // 2 MiB
@@ -89,26 +89,29 @@ impl Tool for WebFetch {
             .ok_or_else(|| Error::Tool("web_fetch: missing `url`".into()))?;
 
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            return Ok(ToolOutcome::err("web_fetch: only http/https URLs are supported"));
+            return Ok(ToolOutcome::err(
+                "web_fetch: only http/https URLs are supported",
+            ));
         }
         // Block obvious localhost/internal targets (SSRF guard).
         if let Ok(parsed) = url::Url::parse(url)
-            && let Some(host) = parsed.host_str() {
-                let lower = host.to_lowercase();
-                if lower == "localhost"
-                    || lower.ends_with(".local")
-                    || lower == "0.0.0.0"
-                    || lower.starts_with("127.")
-                    || lower.starts_with("10.")
-                    || lower.starts_with("192.168.")
-                    || lower.starts_with("169.254.")
-                    || lower.starts_with("[::1")
-                {
-                    return Ok(ToolOutcome::err(format!(
-                        "web_fetch: refusing to fetch internal host `{host}`"
-                    )));
-                }
+            && let Some(host) = parsed.host_str()
+        {
+            let lower = host.to_lowercase();
+            if lower == "localhost"
+                || lower.ends_with(".local")
+                || lower == "0.0.0.0"
+                || lower.starts_with("127.")
+                || lower.starts_with("10.")
+                || lower.starts_with("192.168.")
+                || lower.starts_with("169.254.")
+                || lower.starts_with("[::1")
+            {
+                return Ok(ToolOutcome::err(format!(
+                    "web_fetch: refusing to fetch internal host `{host}`"
+                )));
             }
+        }
 
         let resp = tokio::select! {
             r = self.http.get(url).send() => r,
@@ -132,7 +135,11 @@ impl Tool for WebFetch {
         .map_err(|e| Error::Tool(format!("web_fetch {url} body: {e}")))?;
 
         let truncated = body.len() > MAX_BODY_BYTES;
-        let bytes = if truncated { &body[..MAX_BODY_BYTES] } else { &body[..] };
+        let bytes = if truncated {
+            &body[..MAX_BODY_BYTES]
+        } else {
+            &body[..]
+        };
 
         let text = if content_type.starts_with("text/html") {
             html_to_text(&String::from_utf8_lossy(bytes))
@@ -145,7 +152,10 @@ impl Tool for WebFetch {
             out.push_str(&format!("[truncated at {MAX_BODY_BYTES} bytes]\n"));
         }
         out.push_str(&text);
-        Ok(ToolOutcome { content: out, is_error: !status.is_success() })
+        Ok(ToolOutcome {
+            content: out,
+            is_error: !status.is_success(),
+        })
     }
 }
 
@@ -177,7 +187,10 @@ mod tests {
     async fn rejects_non_http_schemes() {
         let t = WebFetch::new().unwrap();
         let out = t
-            .execute(json!({"url": "file:///etc/passwd"}), CancellationToken::new())
+            .execute(
+                json!({"url": "file:///etc/passwd"}),
+                CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert!(out.is_error);
@@ -187,7 +200,10 @@ mod tests {
     async fn blocks_localhost() {
         let t = WebFetch::new().unwrap();
         let out = t
-            .execute(json!({"url": "http://localhost:8080/"}), CancellationToken::new())
+            .execute(
+                json!({"url": "http://localhost:8080/"}),
+                CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert!(out.is_error);

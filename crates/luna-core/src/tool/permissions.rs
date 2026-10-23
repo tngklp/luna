@@ -43,19 +43,34 @@ pub struct PermissionGate {
 
 impl PermissionGate {
     pub fn new(rules: Vec<Rule>, approval_tools: Vec<String>) -> Self {
-        Self { rules, approval_tools }
+        Self {
+            rules,
+            approval_tools,
+        }
     }
 
     /// Gate with sane defaults: destructive shell prefixes denied, everything
     /// else allowed except tools in the default approval list.
     pub fn default_rules() -> Vec<Rule> {
         vec![
-            Rule::DenyCommandPrefix { prefix: "rm ".into() },
-            Rule::DenyCommandPrefix { prefix: "del ".into() },
-            Rule::DenyCommandPrefix { prefix: "rmdir ".into() },
-            Rule::DenyCommandPrefix { prefix: "format ".into() },
-            Rule::DenyCommandPrefix { prefix: "Remove-Item".into() },
-            Rule::DenyCommandPrefix { prefix: "shutdown".into() },
+            Rule::DenyCommandPrefix {
+                prefix: "rm ".into(),
+            },
+            Rule::DenyCommandPrefix {
+                prefix: "del ".into(),
+            },
+            Rule::DenyCommandPrefix {
+                prefix: "rmdir ".into(),
+            },
+            Rule::DenyCommandPrefix {
+                prefix: "format ".into(),
+            },
+            Rule::DenyCommandPrefix {
+                prefix: "Remove-Item".into(),
+            },
+            Rule::DenyCommandPrefix {
+                prefix: "shutdown".into(),
+            },
         ]
     }
 
@@ -64,9 +79,10 @@ impl PermissionGate {
         // Exact deny wins first.
         for rule in &self.rules {
             if let Rule::DenyTool { tool: t } = rule
-                && t == tool {
-                    return Decision::Denied(format!("tool `{tool}` is denied by config"));
-                }
+                && t == tool
+            {
+                return Decision::Denied(format!("tool `{tool}` is denied by config"));
+            }
         }
 
         // Tool-specific contextual rules.
@@ -87,9 +103,10 @@ impl PermissionGate {
         // Exact allow.
         for rule in &self.rules {
             if let Rule::AllowTool { tool: t } = rule
-                && t == tool {
-                    return Decision::Allowed;
-                }
+                && t == tool
+            {
+                return Decision::Allowed;
+            }
         }
 
         // Default: tools flagged for approval need it; others allowed.
@@ -102,16 +119,25 @@ impl PermissionGate {
 
     /// Like [`evaluate`], but also honors the tool's own
     /// `requires_approval()` flag from the registry.
-    pub fn evaluate_with_registry(&self, tool: &str, input: &Value, registry: &crate::tool::registry::ToolRegistry) -> Decision {
+    pub fn evaluate_with_registry(
+        &self,
+        tool: &str,
+        input: &Value,
+        registry: &crate::tool::registry::ToolRegistry,
+    ) -> Decision {
         // Registry-flagged tools always need approval unless an explicit
         // AllowTool rule whitelists them.
         if let Some(t) = registry.get(tool)
-            && t.requires_approval() {
-                let explicitly_allowed = self.rules.iter().any(|r| matches!(r, Rule::AllowTool { tool: allowed } if allowed == tool));
-                if !explicitly_allowed {
-                    return Decision::NeedsApproval;
-                }
+            && t.requires_approval()
+        {
+            let explicitly_allowed = self
+                .rules
+                .iter()
+                .any(|r| matches!(r, Rule::AllowTool { tool: allowed } if allowed == tool));
+            if !explicitly_allowed {
+                return Decision::NeedsApproval;
             }
+        }
         self.evaluate(tool, input)
     }
 
@@ -141,9 +167,10 @@ impl PermissionGate {
                     }
                 }
                 Rule::AllowCommandPrefix { prefix }
-                    if (cmd.starts_with(prefix.as_str()) || first == prefix) => {
-                        return Some(Decision::Allowed);
-                    }
+                    if (cmd.starts_with(prefix.as_str()) || first == prefix) =>
+                {
+                    return Some(Decision::Allowed);
+                }
                 _ => {}
             }
         }
@@ -163,10 +190,9 @@ impl PermissionGate {
                         )));
                     }
                 }
-                Rule::AllowPath { path: p }
-                    if path.starts_with(p) => {
-                        return Some(Decision::Allowed);
-                    }
+                Rule::AllowPath { path: p } if path.starts_with(p) => {
+                    return Some(Decision::Allowed);
+                }
                 _ => {}
             }
         }
@@ -201,28 +227,47 @@ mod tests {
     fn denies_destructive_shell() {
         let gate = PermissionGate::new(PermissionGate::default_rules(), vec![]);
         let d = gate.evaluate("shell", &json!({"command": "rm -rf /"}));
-        assert_eq!(d, Decision::Denied("command `rm -rf /` matches denied prefix `rm `".into()));
+        assert_eq!(
+            d,
+            Decision::Denied("command `rm -rf /` matches denied prefix `rm `".into())
+        );
     }
 
     #[test]
     fn allows_safe_shell_by_default() {
         let gate = PermissionGate::new(PermissionGate::default_rules(), vec![]);
-        assert_eq!(gate.evaluate("shell", &json!({"command": "cargo test"})), Decision::Allowed);
+        assert_eq!(
+            gate.evaluate("shell", &json!({"command": "cargo test"})),
+            Decision::Allowed
+        );
     }
 
     #[test]
     fn approval_tools_need_approval() {
         let gate = PermissionGate::new(vec![], vec!["shell".into()]);
-        assert_eq!(gate.evaluate("shell", &json!({"command": "ls"})), Decision::NeedsApproval);
+        assert_eq!(
+            gate.evaluate("shell", &json!({"command": "ls"})),
+            Decision::NeedsApproval
+        );
     }
 
     #[test]
     fn deny_tool_beats_allow() {
         let gate = PermissionGate::new(
-            vec![Rule::DenyTool { tool: "shell".into() }, Rule::AllowTool { tool: "shell".into() }],
+            vec![
+                Rule::DenyTool {
+                    tool: "shell".into(),
+                },
+                Rule::AllowTool {
+                    tool: "shell".into(),
+                },
+            ],
             vec![],
         );
-        assert!(matches!(gate.evaluate("shell", &json!({})), Decision::Denied(_)));
+        assert!(matches!(
+            gate.evaluate("shell", &json!({})),
+            Decision::Denied(_)
+        ));
     }
 
     #[test]
@@ -241,7 +286,12 @@ mod tests {
             Decision::Allowed
         );
         // Explicit allow overrides the registry flag.
-        let gate2 = PermissionGate::new(vec![Rule::AllowTool { tool: "write_file".into() }], vec![]);
+        let gate2 = PermissionGate::new(
+            vec![Rule::AllowTool {
+                tool: "write_file".into(),
+            }],
+            vec![],
+        );
         assert_eq!(
             gate2.evaluate_with_registry("write_file", &json!({"path": "a", "content": "b"}), &reg),
             Decision::Allowed
@@ -251,10 +301,15 @@ mod tests {
     #[test]
     fn path_rules() {
         let gate = PermissionGate::new(
-            vec![Rule::DenyPath { path: PathBuf::from("C:\\Windows") }],
+            vec![Rule::DenyPath {
+                path: PathBuf::from("C:\\Windows"),
+            }],
             vec![],
         );
-        let d = gate.evaluate("read_file", &json!({"path": "C:\\Windows\\system32\\config"}));
+        let d = gate.evaluate(
+            "read_file",
+            &json!({"path": "C:\\Windows\\system32\\config"}),
+        );
         assert!(matches!(d, Decision::Denied(_)));
         assert_eq!(
             gate.evaluate("read_file", &json!({"path": "C:\\Users\\tuna\\file.txt"})),

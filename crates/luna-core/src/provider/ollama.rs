@@ -1,11 +1,13 @@
 //! Native Ollama provider: /api/chat streaming, model listing, keep-alive.
 
-use super::types::{CompletionRequest, ContentBlock, Message, Role, StopReason, StreamChunk, ToolSpec};
 use super::Provider;
+use super::types::{
+    CompletionRequest, ContentBlock, Message, Role, StopReason, StreamChunk, ToolSpec,
+};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::pin::Pin;
 
 pub struct OllamaProvider {
@@ -54,7 +56,11 @@ impl OllamaProvider {
                         "type": "function",
                         "function": { "name": name, "arguments": input },
                     })),
-                    ContentBlock::ToolResult { tool_use_id, content: c, .. } => {
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content: c,
+                        ..
+                    } => {
                         tool_results.push((tool_use_id.clone(), c.clone()));
                     }
                 }
@@ -128,7 +134,11 @@ impl Provider for OllamaProvider {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
-            return Err(Error::ProviderHttp { provider: "ollama".into(), status, body });
+            return Err(Error::ProviderHttp {
+                provider: "ollama".into(),
+                status,
+                body,
+            });
         }
 
         // Ollama streams newline-delimited JSON objects (not SSE).
@@ -140,13 +150,17 @@ impl Provider for OllamaProvider {
             let cancel = cancel.clone();
             async move {
                 if cancel.is_cancelled() {
-                    return Some(StreamChunk::Done { stop_reason: StopReason::Cancelled });
+                    return Some(StreamChunk::Done {
+                        stop_reason: StopReason::Cancelled,
+                    });
                 }
                 match item {
                     Ok(bytes) => parse_ndjson_chunk(&String::from_utf8_lossy(&bytes)),
                     Err(e) => {
                         tracing::warn!(error = %e, "ollama stream read error");
-                        Some(StreamChunk::Done { stop_reason: StopReason::EndTurn })
+                        Some(StreamChunk::Done {
+                            stop_reason: StopReason::EndTurn,
+                        })
                     }
                 }
             }
@@ -156,7 +170,11 @@ impl Provider for OllamaProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<String>> {
-        let resp = self.http.get(format!("{}/api/tags", self.base_url)).send().await?;
+        let resp = self
+            .http
+            .get(format!("{}/api/tags", self.base_url))
+            .send()
+            .await?;
         if !resp.status().is_success() {
             return Ok(Vec::new());
         }
@@ -234,7 +252,8 @@ mod tests {
 
     #[test]
     fn parses_text_chunk() {
-        let line = r#"{"model":"llama3.2","message":{"role":"assistant","content":"Hi"},"done":false}"#;
+        let line =
+            r#"{"model":"llama3.2","message":{"role":"assistant","content":"Hi"},"done":false}"#;
         match parse_ndjson_chunk(line) {
             Some(StreamChunk::TextDelta(t)) => assert_eq!(t, "Hi"),
             other => panic!("unexpected: {other:?}"),
@@ -245,7 +264,9 @@ mod tests {
     fn parses_done_chunk() {
         let line = r#"{"model":"llama3.2","message":{},"done":true}"#;
         match parse_ndjson_chunk(line) {
-            Some(StreamChunk::Done { stop_reason: StopReason::EndTurn }) => {}
+            Some(StreamChunk::Done {
+                stop_reason: StopReason::EndTurn,
+            }) => {}
             other => panic!("unexpected: {other:?}"),
         }
     }

@@ -45,7 +45,10 @@ pub enum Command {
     /// Send a user message to the agent.
     UserMessage(String),
     /// Respond to a pending approval request.
-    Approval { request_id: uuid::Uuid, approved: bool },
+    Approval {
+        request_id: uuid::Uuid,
+        approved: bool,
+    },
     /// Cancel the current run.
     Cancel,
 }

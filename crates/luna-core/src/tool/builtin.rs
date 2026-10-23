@@ -3,7 +3,7 @@
 use super::registry::{Tool, ToolOutcome};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
 
@@ -14,7 +14,9 @@ fn resolve_path(raw: &str) -> PathBuf {
     if p.is_absolute() {
         p.to_path_buf()
     } else {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(p)
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(p)
     }
 }
 
@@ -101,7 +103,11 @@ impl Tool for WriteFile {
         tokio::fs::write(&path, content)
             .await
             .map_err(|e| Error::Tool(format!("write_file {}: {e}", path.display())))?;
-        Ok(ToolOutcome::ok(format!("wrote {} bytes to {}", content.len(), path.display())))
+        Ok(ToolOutcome::ok(format!(
+            "wrote {} bytes to {}",
+            content.len(),
+            path.display()
+        )))
     }
 }
 
@@ -232,20 +238,24 @@ impl Tool for Shell {
         let working_dir = input["working_dir"].as_str().map(PathBuf::from);
 
         #[cfg(windows)]
-        let (program, args): (String, Vec<String>) =
-            ("powershell".into(), vec!["-NoProfile".into(), "-Command".into(), command]);
+        let (program, args): (String, Vec<String>) = (
+            "powershell".into(),
+            vec!["-NoProfile".into(), "-Command".into(), command],
+        );
         #[cfg(not(windows))]
-        let (program, args): (String, Vec<String>) =
-            ("sh".into(), vec!["-c".into(), command]);
+        let (program, args): (String, Vec<String>) = ("sh".into(), vec!["-c".into(), command]);
 
         let mut cmd = tokio::process::Command::new(&program);
         cmd.args(&args).stdin(std::process::Stdio::null());
         if let Some(dir) = &working_dir {
             cmd.current_dir(dir);
         }
-        cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
 
-        let child = cmd.spawn().map_err(|e| Error::Tool(format!("shell spawn: {e}")))?;
+        let child = cmd
+            .spawn()
+            .map_err(|e| Error::Tool(format!("shell spawn: {e}")))?;
 
         // Cancellation: kill the child when the token fires.
         let kill_token = cancel.clone();
@@ -279,9 +289,15 @@ impl Tool for Shell {
             return Err(Error::Cancelled);
         }
         if !out.status.success() {
-            text.push_str(&format!("\n[exit code: {}]", out.status.code().unwrap_or(-1)));
+            text.push_str(&format!(
+                "\n[exit code: {}]",
+                out.status.code().unwrap_or(-1)
+            ));
         }
-        Ok(ToolOutcome { content: text, is_error: !out.status.success() })
+        Ok(ToolOutcome {
+            content: text,
+            is_error: !out.status.success(),
+        })
     }
 }
 
@@ -336,14 +352,20 @@ mod tests {
         let path = dir.path().join("sub").join("a.txt");
         let wf = WriteFile;
         let out = wf
-            .execute(json!({"path": path.to_string_lossy(), "content": "hello luna"}), CancellationToken::new())
+            .execute(
+                json!({"path": path.to_string_lossy(), "content": "hello luna"}),
+                CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert!(!out.is_error);
 
         let rf = ReadFile;
         let out = rf
-            .execute(json!({"path": path.to_string_lossy()}), CancellationToken::new())
+            .execute(
+                json!({"path": path.to_string_lossy()}),
+                CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert_eq!(out.content, "hello luna");
@@ -356,7 +378,10 @@ mod tests {
         std::fs::create_dir(dir.path().join("subdir")).unwrap();
         let ld = ListDir;
         let out = ld
-            .execute(json!({"path": dir.path().to_string_lossy()}), CancellationToken::new())
+            .execute(
+                json!({"path": dir.path().to_string_lossy()}),
+                CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert_eq!(out.content, "subdir/\nx.txt");
@@ -383,11 +408,19 @@ mod tests {
     #[tokio::test]
     async fn shell_echoes() {
         let sh = Shell;
-        let cmd = if cfg!(windows) { "Write-Output luna-test-123" } else { "echo luna-test-123" };
+        let cmd = if cfg!(windows) {
+            "Write-Output luna-test-123"
+        } else {
+            "echo luna-test-123"
+        };
         let out = sh
             .execute(json!({"command": cmd}), CancellationToken::new())
             .await
             .unwrap();
-        assert!(out.content.contains("luna-test-123"), "got: {}", out.content);
+        assert!(
+            out.content.contains("luna-test-123"),
+            "got: {}",
+            out.content
+        );
     }
 }

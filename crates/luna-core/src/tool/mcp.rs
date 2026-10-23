@@ -4,8 +4,8 @@ use crate::error::{Error, Result};
 use crate::provider::ToolSpec;
 use crate::tool::registry::{Tool, ToolOutcome, ToolRegistry};
 use rmcp::model::{CallToolRequestParams, ListToolsResult};
-use rmcp::service::{RoleClient, ServiceExt};
 use rmcp::service::RunningService;
+use rmcp::service::{RoleClient, ServiceExt};
 use rmcp::transport::child_process::TokioChildProcess;
 use serde_json::Value;
 use std::sync::Arc;
@@ -71,7 +71,11 @@ impl McpConnection {
         let arguments = match input {
             Value::Object(map) => Some(map.into_iter().collect()),
             Value::Null => None,
-            other => return Ok(ToolOutcome::err(format!("mcp: arguments must be an object, got {other}"))),
+            other => {
+                return Ok(ToolOutcome::err(format!(
+                    "mcp: arguments must be an object, got {other}"
+                )));
+            }
         };
 
         let result = self
@@ -82,7 +86,12 @@ impl McpConnection {
                 params
             })
             .await
-            .map_err(|e| Error::Tool(format!("mcp `{}` call `{wire_name}`: {e}", self.server_name)))?;
+            .map_err(|e| {
+                Error::Tool(format!(
+                    "mcp `{}` call `{wire_name}`: {e}",
+                    self.server_name
+                ))
+            })?;
 
         // Concatenate text content; flag errors from the structured result.
         let mut text = String::new();
@@ -98,7 +107,10 @@ impl McpConnection {
         if is_error && text.is_empty() {
             text = "mcp tool reported an error".into();
         }
-        Ok(ToolOutcome { content: text, is_error })
+        Ok(ToolOutcome {
+            content: text,
+            is_error,
+        })
     }
 }
 

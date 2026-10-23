@@ -16,11 +16,17 @@ pub struct ToolOutcome {
 
 impl ToolOutcome {
     pub fn ok(content: impl Into<String>) -> Self {
-        Self { content: content.into(), is_error: false }
+        Self {
+            content: content.into(),
+            is_error: false,
+        }
     }
 
     pub fn err(content: impl Into<String>) -> Self {
-        Self { content: content.into(), is_error: true }
+        Self {
+            content: content.into(),
+            is_error: true,
+        }
     }
 }
 
@@ -96,7 +102,9 @@ impl ToolRegistry {
     /// Validate that `input` is an object (deeper schema validation later).
     pub fn validate_input(&self, name: &str, input: &Value) -> Result<()> {
         if !input.is_object() {
-            return Err(Error::Tool(format!("tool `{name}` input must be a JSON object")));
+            return Err(Error::Tool(format!(
+                "tool `{name}` input must be a JSON object"
+            )));
         }
         if !self.contains(name) {
             return Err(Error::Tool(format!("unknown tool `{name}`")));
@@ -123,7 +131,11 @@ mod tests {
         fn parameters(&self) -> Value {
             json!({"type": "object", "properties": {"text": {"type": "string"}}})
         }
-        async fn execute(&self, input: Value, _cancel: tokio_util::sync::CancellationToken) -> Result<ToolOutcome> {
+        async fn execute(
+            &self,
+            input: Value,
+            _cancel: tokio_util::sync::CancellationToken,
+        ) -> Result<ToolOutcome> {
             Ok(ToolOutcome::ok(input["text"].as_str().unwrap_or("")))
         }
     }
@@ -143,7 +155,10 @@ mod tests {
         reg.register(Arc::new(Echo));
         let t = reg.get("echo").unwrap();
         let out = t
-            .execute(json!({"text": "hi"}), tokio_util::sync::CancellationToken::new())
+            .execute(
+                json!({"text": "hi"}),
+                tokio_util::sync::CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert_eq!(out.content, "hi");

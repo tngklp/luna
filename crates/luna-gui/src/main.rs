@@ -6,9 +6,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use luna_core::event::{EventKind, LunaEvent};
+use luna_core::orchestrator::AgentRegistry;
 use luna_core::orchestrator::agent_loop::{AgentContext, AgentRunner, AgentSpec, ApprovalSink};
 use luna_core::orchestrator::registry::ProviderSettings;
-use luna_core::orchestrator::AgentRegistry;
 use luna_core::provider::types::Message;
 use luna_core::tool::builtin;
 use luna_core::tool::permissions::PermissionGate;
@@ -71,16 +71,47 @@ struct UiEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum UiEventKind {
     RunStarted,
-    UserMessage { text: String },
-    AssistantMessage { text: String },
-    TokenDelta { text: String },
-    ToolCallRequested { call_id: String, name: String, arguments: serde_json::Value },
-    ToolCallFinished { call_id: String, name: String, outcome: String, is_error: bool },
-    ApprovalRequested { request_id: String, tool_name: String, arguments: serde_json::Value },
-    ApprovalResolved { request_id: String, approved: bool },
-    AgentSpawned { agent_id: String, parent: Option<String>, spec_name: String },
-    OrchestratorTransition { description: String },
-    RunFinished { summary: Option<String>, error: Option<String> },
+    UserMessage {
+        text: String,
+    },
+    AssistantMessage {
+        text: String,
+    },
+    TokenDelta {
+        text: String,
+    },
+    ToolCallRequested {
+        call_id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    ToolCallFinished {
+        call_id: String,
+        name: String,
+        outcome: String,
+        is_error: bool,
+    },
+    ApprovalRequested {
+        request_id: String,
+        tool_name: String,
+        arguments: serde_json::Value,
+    },
+    ApprovalResolved {
+        request_id: String,
+        approved: bool,
+    },
+    AgentSpawned {
+        agent_id: String,
+        parent: Option<String>,
+        spec_name: String,
+    },
+    OrchestratorTransition {
+        description: String,
+    },
+    RunFinished {
+        summary: Option<String>,
+        error: Option<String>,
+    },
 }
 
 impl UiEvent {
@@ -89,42 +120,67 @@ impl UiEvent {
         let kind = match &ev.kind {
             EventKind::RunStarted => UiEventKind::RunStarted,
             EventKind::UserMessage(text) => UiEventKind::UserMessage { text: text.clone() },
-            EventKind::AssistantMessage(text) => UiEventKind::AssistantMessage { text: text.clone() },
+            EventKind::AssistantMessage(text) => {
+                UiEventKind::AssistantMessage { text: text.clone() }
+            }
             EventKind::TokenDelta(text) => UiEventKind::TokenDelta { text: text.clone() },
-            EventKind::ToolCallRequested { call_id, name, arguments } => UiEventKind::ToolCallRequested {
+            EventKind::ToolCallRequested {
+                call_id,
+                name,
+                arguments,
+            } => UiEventKind::ToolCallRequested {
                 call_id: call_id.clone(),
                 name: name.clone(),
                 arguments: arguments.clone(),
             },
-            EventKind::ToolCallFinished { call_id, name, outcome } => UiEventKind::ToolCallFinished {
+            EventKind::ToolCallFinished {
+                call_id,
+                name,
+                outcome,
+            } => UiEventKind::ToolCallFinished {
                 call_id: call_id.clone(),
                 name: name.clone(),
                 outcome: outcome.content.clone(),
                 is_error: outcome.is_error,
             },
-            EventKind::ApprovalRequested { request_id, tool_name, arguments, .. } => UiEventKind::ApprovalRequested {
+            EventKind::ApprovalRequested {
+                request_id,
+                tool_name,
+                arguments,
+                ..
+            } => UiEventKind::ApprovalRequested {
                 request_id: request_id.to_string(),
                 tool_name: tool_name.clone(),
                 arguments: arguments.clone(),
             },
-            EventKind::ApprovalResolved { request_id, approved } => UiEventKind::ApprovalResolved {
+            EventKind::ApprovalResolved {
+                request_id,
+                approved,
+            } => UiEventKind::ApprovalResolved {
                 request_id: request_id.to_string(),
                 approved: *approved,
             },
-            EventKind::AgentSpawned { agent_id, parent, spec_name } => UiEventKind::AgentSpawned {
+            EventKind::AgentSpawned {
+                agent_id,
+                parent,
+                spec_name,
+            } => UiEventKind::AgentSpawned {
                 agent_id: agent_id.clone(),
                 parent: parent.clone(),
                 spec_name: spec_name.clone(),
             },
-            EventKind::OrchestratorTransition(d) => {
-                UiEventKind::OrchestratorTransition { description: d.clone() }
-            }
+            EventKind::OrchestratorTransition(d) => UiEventKind::OrchestratorTransition {
+                description: d.clone(),
+            },
             EventKind::RunFinished { summary, error } => UiEventKind::RunFinished {
                 summary: summary.clone(),
                 error: error.clone(),
             },
         };
-        Some(Self { agent_id: agent, kind })
+        Some(Self {
+            agent_id: agent,
+            kind,
+        })
     }
 }
 
@@ -203,7 +259,9 @@ async fn build_stack(cfg: &luna_core::config::Config) -> Result<CoreStack, Strin
     );
     let spec = if let Some(agent_cfg) = cfg.agents.first() {
         registry.register_agent(agent_cfg.clone());
-        registry.resolve(&agent_cfg.name).map_err(|e| e.to_string())?
+        registry
+            .resolve(&agent_cfg.name)
+            .map_err(|e| e.to_string())?
     } else {
         AgentSpec {
             name: "assistant".into(),
@@ -222,15 +280,26 @@ async fn build_stack(cfg: &luna_core::config::Config) -> Result<CoreStack, Strin
     if let Ok(web) = luna_core::tool::web::WebFetch::new() {
         tools.register(Arc::new(web));
     }
-    let (ok, failed) = luna_core::tool::mcp::register_from_config(&mut tools, &cfg.mcp_servers).await;
+    let (ok, failed) =
+        luna_core::tool::mcp::register_from_config(&mut tools, &cfg.mcp_servers).await;
     if failed > 0 {
         tracing::warn!(connected = ok, failed, "mcp servers partially connected");
     }
 
-    Ok(CoreStack { provider, registry, tools, default_spec: spec })
+    Ok(CoreStack {
+        provider,
+        registry,
+        tools,
+        default_spec: spec,
+    })
 }
 
-fn build_ctx(state: &LunaState, provider: Arc<dyn luna_core::provider::Provider>, tools: ToolRegistry, cfg: &luna_core::config::Config) -> AgentContext {
+fn build_ctx(
+    state: &LunaState,
+    provider: Arc<dyn luna_core::provider::Provider>,
+    tools: ToolRegistry,
+    cfg: &luna_core::config::Config,
+) -> AgentContext {
     AgentContext {
         provider,
         tools,
@@ -318,20 +387,36 @@ async fn luna_run_plan(
         }
         "fanout" => {
             let workers = request.workers.ok_or("fanout plan requires `workers`")?;
-            luna_core::orchestrator::runner::TaskPlan::FanOut { agents: workers, join_prompt: None }
+            luna_core::orchestrator::runner::TaskPlan::FanOut {
+                agents: workers,
+                join_prompt: None,
+            }
         }
         "supervised" => {
-            let supervisor = request.agent.ok_or("supervised plan requires `agent` (supervisor)")?;
-            let workers = request.workers.ok_or("supervised plan requires `workers`")?;
-            luna_core::orchestrator::runner::TaskPlan::Supervised { supervisor, workers }
+            let supervisor = request
+                .agent
+                .ok_or("supervised plan requires `agent` (supervisor)")?;
+            let workers = request
+                .workers
+                .ok_or("supervised plan requires `workers`")?;
+            luna_core::orchestrator::runner::TaskPlan::Supervised {
+                supervisor,
+                workers,
+            }
         }
         other => return Err(format!("unknown plan mode `{other}`")),
     };
 
-    let orch = luna_core::orchestrator::runner::Orchestrator::new(stack.registry, state.bus.clone());
+    let orch =
+        luna_core::orchestrator::runner::Orchestrator::new(stack.registry, state.bus.clone());
     let cancel = state.cancel.clone();
     let result = orch
-        .execute(plan, &ctx, Arc::new(luna_core::orchestrator::agent_loop::AutoApprove), cancel)
+        .execute(
+            plan,
+            &ctx,
+            Arc::new(luna_core::orchestrator::agent_loop::AutoApprove),
+            cancel,
+        )
         .await
         .map_err(|e| e.to_string())?;
 
@@ -365,7 +450,10 @@ async fn luna_load_session(
     state: State<'_, LunaState>,
     session_id: String,
 ) -> Result<Vec<UiEvent>, String> {
-    let events = state.store.load_events(&session_id).map_err(|e| e.to_string())?;
+    let events = state
+        .store
+        .load_events(&session_id)
+        .map_err(|e| e.to_string())?;
     Ok(events.iter().filter_map(UiEvent::from_core).collect())
 }
 
@@ -377,7 +465,10 @@ async fn luna_load_session(
 fn install_cli_shim() {
     #[cfg(windows)]
     {
-        let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())) else {
+        let Some(exe_dir) = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        else {
             return;
         };
         if !exe_dir.join("luna.exe").exists() {
@@ -385,7 +476,10 @@ fn install_cli_shim() {
         }
         let dir_str = exe_dir.to_string_lossy().to_string();
         let user_path = std::env::var("PATH").unwrap_or_default();
-        if user_path.split(';').any(|p| p.eq_ignore_ascii_case(&dir_str)) {
+        if user_path
+            .split(';')
+            .any(|p| p.eq_ignore_ascii_case(&dir_str))
+        {
             return;
         }
         // setx truncates >1024 chars; guard against clobbering long PATHs.
@@ -418,29 +512,45 @@ type ProviderSettingsTuple = (String, u32, f32);
 
 fn pick_provider(
     cfg: &luna_core::config::Config,
-) -> Option<(String, std::sync::Arc<dyn luna_core::provider::Provider>, ProviderSettingsTuple)> {
+) -> Option<(
+    String,
+    std::sync::Arc<dyn luna_core::provider::Provider>,
+    ProviderSettingsTuple,
+)> {
     // Env-var API keys take precedence in provider selection order.
     if cfg.providers.anthropic.enabled
         && let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
-            && let Ok(p) = luna_core::provider::anthropic::AnthropicProvider::new(key) {
-                let c = &cfg.providers.anthropic;
-                return Some(("anthropic".into(), std::sync::Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
-            }
+        && let Ok(p) = luna_core::provider::anthropic::AnthropicProvider::new(key)
+    {
+        let c = &cfg.providers.anthropic;
+        return Some((
+            "anthropic".into(),
+            std::sync::Arc::new(p),
+            (c.model.clone(), c.max_tokens, c.temperature),
+        ));
+    }
     if cfg.providers.openai.enabled
         && let Ok(key) = std::env::var("OPENAI_API_KEY")
-            && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::openai(key) {
-                let c = &cfg.providers.openai;
-                return Some(("openai".into(), std::sync::Arc::new(p), (c.model.clone(), c.max_tokens, c.temperature)));
-            }
+        && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::openai(key)
+    {
+        let c = &cfg.providers.openai;
+        return Some((
+            "openai".into(),
+            std::sync::Arc::new(p),
+            (c.model.clone(), c.max_tokens, c.temperature),
+        ));
+    }
     if cfg.providers.ollama.enabled
-        && let Ok(p) = luna_core::provider::ollama::OllamaProvider::new(&cfg.providers.ollama.base_url) {
-            let c = &cfg.providers.ollama;
-            return Some((
-                "ollama".into(),
-                std::sync::Arc::new(p),
-                (c.model.clone(), c.max_tokens, c.temperature),
-            ));
-        }
+        && let Ok(p) =
+            luna_core::provider::ollama::OllamaProvider::new(&cfg.providers.ollama.base_url)
+    {
+        let c = &cfg.providers.ollama;
+        return Some((
+            "ollama".into(),
+            std::sync::Arc::new(p),
+            (c.model.clone(), c.max_tokens, c.temperature),
+        ));
+    }
     None
 }
 
@@ -502,17 +612,24 @@ fn main() {
                         Command::UserMessage(text) => {
                             bus2.publish(LunaEvent::new(sid2, None, EventKind::UserMessage(text)));
                         }
-                        Command::Approval { request_id, approved } => {
+                        Command::Approval {
+                            request_id,
+                            approved,
+                        } => {
                             bus2.publish(LunaEvent::new(
                                 sid2,
                                 None,
-                                EventKind::ApprovalResolved { request_id, approved },
+                                EventKind::ApprovalResolved {
+                                    request_id,
+                                    approved,
+                                },
                             ));
                         }
                         Command::Cancel => cancel2.cancel(),
                     }
                 }
-            });            Ok(())
+            });
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             luna_send_message,

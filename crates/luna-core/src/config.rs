@@ -45,9 +45,25 @@ pub struct ProvidersConfig {
 impl Default for ProvidersConfig {
     fn default() -> Self {
         Self {
-            anthropic: ProviderConfig { enabled: false, model: "claude-sonnet-4-5".into(), max_tokens: 8192, temperature: 0.7 },
-            openai: ProviderConfig { enabled: false, model: "gpt-5".into(), max_tokens: 8192, temperature: 0.7 },
-            ollama: OllamaConfig { enabled: false, base_url: "http://localhost:11434".into(), model: "llama3.2".into(), max_tokens: 8192, temperature: 0.7 },
+            anthropic: ProviderConfig {
+                enabled: false,
+                model: "claude-sonnet-4-5".into(),
+                max_tokens: 8192,
+                temperature: 0.7,
+            },
+            openai: ProviderConfig {
+                enabled: false,
+                model: "gpt-5".into(),
+                max_tokens: 8192,
+                temperature: 0.7,
+            },
+            ollama: OllamaConfig {
+                enabled: false,
+                base_url: "http://localhost:11434".into(),
+                model: "llama3.2".into(),
+                max_tokens: 8192,
+                temperature: 0.7,
+            },
             custom: Default::default(),
         }
     }
@@ -67,7 +83,12 @@ pub struct ProviderConfig {
 
 impl Default for ProviderConfig {
     fn default() -> Self {
-        Self { enabled: false, model: String::new(), max_tokens: default_max_tokens(), temperature: default_temperature() }
+        Self {
+            enabled: false,
+            model: String::new(),
+            max_tokens: default_max_tokens(),
+            temperature: default_temperature(),
+        }
     }
 }
 
@@ -142,7 +163,9 @@ pub struct StorageConfig {
 
 impl Default for StorageConfig {
     fn default() -> Self {
-        Self { data_dir: default_data_dir() }
+        Self {
+            data_dir: default_data_dir(),
+        }
     }
 }
 
@@ -263,7 +286,8 @@ mod tests {
 
     #[test]
     fn missing_file_yields_defaults() {
-        let cfg = Config::load_from(std::path::Path::new("Z:/definitely/missing/luna.toml")).unwrap();
+        let cfg =
+            Config::load_from(std::path::Path::new("Z:/definitely/missing/luna.toml")).unwrap();
         assert!(cfg.agents.is_empty());
     }
 

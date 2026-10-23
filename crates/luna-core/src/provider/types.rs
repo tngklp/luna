@@ -17,9 +17,19 @@ pub enum Role {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
-    Text { text: String },
-    ToolUse { id: String, name: String, input: Value },
-    ToolResult { tool_use_id: String, content: String, is_error: bool },
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        is_error: bool,
+    },
 }
 
 /// A single message in a conversation.
@@ -31,18 +41,31 @@ pub struct Message {
 
 impl Message {
     pub fn system(text: impl Into<String>) -> Self {
-        Self { role: Role::System, content: vec![ContentBlock::Text { text: text.into() }] }
+        Self {
+            role: Role::System,
+            content: vec![ContentBlock::Text { text: text.into() }],
+        }
     }
 
     pub fn user(text: impl Into<String>) -> Self {
-        Self { role: Role::User, content: vec![ContentBlock::Text { text: text.into() }] }
+        Self {
+            role: Role::User,
+            content: vec![ContentBlock::Text { text: text.into() }],
+        }
     }
 
     pub fn assistant_text(text: impl Into<String>) -> Self {
-        Self { role: Role::Assistant, content: vec![ContentBlock::Text { text: text.into() }] }
+        Self {
+            role: Role::Assistant,
+            content: vec![ContentBlock::Text { text: text.into() }],
+        }
     }
 
-    pub fn tool_result(tool_use_id: impl Into<String>, content: impl Into<String>, is_error: bool) -> Self {
+    pub fn tool_result(
+        tool_use_id: impl Into<String>,
+        content: impl Into<String>,
+        is_error: bool,
+    ) -> Self {
         Self {
             role: Role::Tool,
             content: vec![ContentBlock::ToolResult {
@@ -70,7 +93,9 @@ impl Message {
         self.content
             .iter()
             .filter_map(|b| match b {
-                ContentBlock::ToolUse { id, name, input } => Some((id.clone(), name.clone(), input.clone())),
+                ContentBlock::ToolUse { id, name, input } => {
+                    Some((id.clone(), name.clone(), input.clone()))
+                }
                 _ => None,
             })
             .collect()
@@ -103,9 +128,16 @@ pub enum StreamChunk {
     /// Incremental text.
     TextDelta(String),
     /// A complete tool call (assembled from deltas by the provider).
-    ToolUse { id: String, name: String, input: Value },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
     /// Usage report at end of stream.
-    Usage { input_tokens: u64, output_tokens: u64 },
+    Usage {
+        input_tokens: u64,
+        output_tokens: u64,
+    },
     /// The stream finished with this stop reason.
     Done { stop_reason: StopReason },
 }
@@ -129,7 +161,11 @@ mod tests {
             role: Role::Assistant,
             content: vec![
                 ContentBlock::Text { text: "a".into() },
-                ContentBlock::ToolUse { id: "t1".into(), name: "x".into(), input: Value::Null },
+                ContentBlock::ToolUse {
+                    id: "t1".into(),
+                    name: "x".into(),
+                    input: Value::Null,
+                },
                 ContentBlock::Text { text: "b".into() },
             ],
         };
