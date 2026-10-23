@@ -28,11 +28,20 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path crates/luna-gui/binaries | Out-Null
+          # macOS-latest is ARM64; ubuntu/windows-latest are x86_64.
+          $arch = switch ("${{ runner.os }}") {
+            "macOS" { "aarch64" }
+            default { "x86_64" }
+          }
+          $os_tag = switch ("${{ runner.os }}") {
+            "Linux" { "unknown-linux-gnu" }
+            "macOS" { "apple-darwin" }
+            "Windows" { "pc-windows-msvc" }
+          }
           $ext = if ("${{ runner.os }}" -eq "Windows") { ".exe" } else { "" }
-          $arch = if ("${{ runner.os }}" -eq "macOS" -and "${{ matrix.os }}" -like "*arm*") { "aarch64" } else { "x86_64" }
-          $os_tag = switch ("${{ runner.os }}") { "Linux" { "unknown-linux-gnu" } "macOS" { "apple-darwin" } "Windows" { "pc-windows-msvc" } }
           $p = "crates/luna-gui/binaries/luna-$arch-$os_tag$ext"
           if (-not (Test-Path $p)) { Set-Content -Path $p -Value "" -NoNewline }
+          Write-Host "staged $p"
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
