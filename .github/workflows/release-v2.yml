@@ -75,4 +75,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build TUI CLI (sidecar)
+        run: cargo build --release -p luna-tui --target ${{ matrix.target }}
+      - name: Stage sidecar binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path crates/luna-gui/binaries | Out-Null
+          ${ext} = if ("${{ runner.os }}" -eq "Windows") { ".exe" } else { "" }
+          Copy-Item "target/${{ matrix.target }}/release/luna${ext}" 
+            "crates/luna-gui/binaries/luna-${{ matrix.target }}${ext}"
+      - name: Build frontend
+        working-directory: crates/luna-gui/ui
+        run: npm ci && npm run build
