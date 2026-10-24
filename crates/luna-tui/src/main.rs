@@ -1,6 +1,7 @@
 //! Luna TUI: terminal interface (ratatui + crossterm).
 
 mod app;
+mod markdown;
 mod setup;
 mod ui;
 
@@ -143,7 +144,7 @@ async fn run_app_async(cfg: Config) -> anyhow_noop::Result<()> {
             }
         }
     };
-    luna_core::storage::attach_store(&bus, store);
+    luna_core::storage::attach_store(&bus, store.clone());
 
     let ctx = AgentContext {
         provider: resolved.provider,
@@ -161,7 +162,7 @@ async fn run_app_async(cfg: Config) -> anyhow_noop::Result<()> {
 
     // Terminal setup.
     let mut terminal = tui_init()?;
-    let result = app::run(&mut terminal, bus, ctx, spec, history.clone());
+    let result = app::run(&mut terminal, bus, ctx, spec, history.clone(), Some(store));
     tui_restore()?;
 
     result
