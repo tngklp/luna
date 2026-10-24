@@ -100,7 +100,6 @@ jobs:
         with:
           name: gui-${{ matrix.target }}
           path: |
-            target/*/release/bundle/**/*.msi
             target/*/release/bundle/**/*.exe
             target/*/release/bundle/**/*.dmg
             target/*/release/bundle/**/*.app.tar.gz
@@ -119,7 +118,6 @@ jobs:
         with:
           files: |
             dist/luna-*
-            dist/*/release/bundle/**/*.msi
             dist/*/release/bundle/**/*.exe
             dist/*/release/bundle/**/*.dmg
             dist/*/release/bundle/**/*.app.tar.gz
