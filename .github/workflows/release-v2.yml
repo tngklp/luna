@@ -66,8 +66,10 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            bundles: nsis
           - os: macos-latest
             target: aarch64-apple-darwin
+            bundles: dmg
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +95,7 @@ jobs:
         working-directory: crates/luna-gui
         run: |
           cargo install tauri-cli --version '^2' --locked
-          cargo tauri build --target ${{ matrix.target }}
+          cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
       - name: "Upload GUI artifact (Windows NSIS installer)"
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
