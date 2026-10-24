@@ -20,3 +20,4 @@ Thumbs.db
 # Tauri generated schemas + sidecar binaries (CI-provided)
 crates/luna-gui/gen/
 crates/luna-gui/binaries/luna-*
+
