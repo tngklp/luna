@@ -39,6 +39,12 @@ fn resolve_builtin(key: &str, p: &ProviderConfig) -> Option<ResolvedProvider> {
     if !p.enabled {
         return None;
     }
+    // A zero value in a hand-written config would make every request fail.
+    let max_tokens = if p.max_tokens == 0 {
+        8192
+    } else {
+        p.max_tokens
+    };
     if key == "anthropic" {
         let api_key = p.effective_api_key("ANTHROPIC_API_KEY");
         if api_key.is_empty() {
@@ -56,7 +62,7 @@ fn resolve_builtin(key: &str, p: &ProviderConfig) -> Option<ResolvedProvider> {
             } else {
                 p.model.clone()
             },
-            max_tokens: p.max_tokens,
+            max_tokens,
             temperature: p.temperature,
         });
     }
@@ -76,7 +82,7 @@ fn resolve_builtin(key: &str, p: &ProviderConfig) -> Option<ResolvedProvider> {
         } else {
             p.model.clone()
         },
-        max_tokens: p.max_tokens,
+        max_tokens,
         temperature: p.temperature,
     })
 }
@@ -94,7 +100,11 @@ fn resolve_ollama(o: &OllamaConfig) -> Option<ResolvedProvider> {
         } else {
             o.model.clone()
         },
-        max_tokens: o.max_tokens,
+        max_tokens: if o.max_tokens == 0 {
+            8192
+        } else {
+            o.max_tokens
+        },
         temperature: o.temperature,
     })
 }
@@ -113,7 +123,13 @@ fn resolve_custom(name: &str, c: &CustomProviderConfig) -> Option<ResolvedProvid
         key: name.to_string(),
         provider: Arc::new(provider),
         model: c.model.clone(),
-        max_tokens: c.max_tokens,
+        // A zero/absent value in a hand-written config would make every
+        // request fail; fall back to the default.
+        max_tokens: if c.max_tokens == 0 {
+            8192
+        } else {
+            c.max_tokens
+        },
         temperature: c.temperature,
     })
 }

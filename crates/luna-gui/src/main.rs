@@ -618,6 +618,24 @@ async fn luna_set_default_provider(key: String) -> Result<(), String> {
 }
 
 fn main() {
+    // Log panics to ~/.luna/logs/gui-panic.log — a release GUI has no console,
+    // so an early panic would otherwise look like "the app does nothing".
+    let log_dir = luna_core::config::logs_dir();
+    let _ = std::fs::create_dir_all(&log_dir);
+    let panic_path = log_dir.join("gui-panic.log");
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = format!("{info}\n");
+        eprintln!("{msg}");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&panic_path)
+        {
+            use std::io::Write;
+            let _ = writeln!(f, "[{}] {msg}", chrono::Utc::now().to_rfc3339());
+        }
+    }));
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -630,7 +648,8 @@ fn main() {
     let cancel = CancellationToken::new();
     let session_id = uuid::Uuid::new_v4();
 
-    // SQLite persistence: ~/.luna/sessions.db, store attached to the bus.
+    // SQLite persistence: ~/.luna/sessions.db. The store task is spawned in
+    // `setup` below, where Tauri's async runtime is guaranteed to exist.
     let store = {
         let path = luna_core::config::sessions_db_path();
         match luna_core::storage::Store::open(&path) {
@@ -641,7 +660,6 @@ fn main() {
             }
         }
     };
-    luna_core::storage::attach_store(&bus, store.clone());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -656,7 +674,16 @@ fn main() {
         })
         .setup(move |app| {
             let handle = app.handle().clone();
-            spawn_event_forwarder(handle, bus);
+            spawn_event_forwarder(handle, bus.clone());
+            // Persistence task: needs a runtime, which exists here.
+            {
+                let state: tauri::State<LunaState> = app.state();
+                let bus = state.bus.clone();
+                let store = state.store.clone();
+                tauri::async_runtime::spawn(async move {
+                    luna_core::storage::attach_store(&bus, store);
+                });
+            }
             // PATH registration in the background — never blocks window show.
             tauri::async_runtime::spawn(async {
                 install_cli_shim();

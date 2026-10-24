@@ -272,6 +272,9 @@ fn deserialize_kind(kind: &str, payload: &str) -> EventKind {
 }
 
 /// Spawn a background task that records every bus event into the store.
+///
+/// Must be called from within a tokio runtime context (the TUI's run loop
+/// and the GUI's async commands both provide one).
 pub fn attach_store(
     bus: &crate::event::EventBus,
     store: std::sync::Arc<Store>,

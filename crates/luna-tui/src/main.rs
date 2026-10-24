@@ -33,9 +33,16 @@ fn main() -> anyhow_noop::Result<()> {
             println!("Options:");
             println!("  -V, --version  Print version");
             println!("  -h, --help     Print help");
+            println!("  --check        Validate config and provider setup, then exit");
+            println!("  --setup        Re-run the interactive setup wizard");
             println!();
             println!("In the TUI: type a message and press Enter; Esc quits;");
             println!("Ctrl+D cancels a running agent; y/n answers approval prompts.");
+            return Ok(());
+        }
+        Some("--check") => return check_setup(),
+        Some("--setup") => {
+            setup::run_wizard()?;
             return Ok(());
         }
         Some(other) => {
@@ -71,6 +78,12 @@ fn run_app() -> anyhow_noop::Result<()> {
 }
 
 fn start_tui(cfg: Config) -> anyhow_noop::Result<()> {
+    // One runtime for the whole app: MCP connect, store task, agent runs.
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(run_app_async(cfg))
+}
+
+async fn run_app_async(cfg: Config) -> anyhow_noop::Result<()> {
     let resolved = resolve_active(&cfg).ok_or_else(|| {
         std::io::Error::other(
             "no usable provider: run `luna setup`, or enable a provider with an API key in ~/.luna/config.toml",
@@ -110,10 +123,8 @@ fn start_tui(cfg: Config) -> anyhow_noop::Result<()> {
     }
     // MCP servers connect before the terminal takes over (failures skipped).
     if !cfg.mcp_servers.is_empty() {
-        let rt = tokio::runtime::Runtime::new()?;
-        let (ok, failed) = rt.block_on(async {
-            luna_core::tool::mcp::register_from_config(&mut tools, &cfg.mcp_servers).await
-        });
+        let (ok, failed) =
+            luna_core::tool::mcp::register_from_config(&mut tools, &cfg.mcp_servers).await;
         if ok + failed > 0 {
             eprintln!("mcp: {ok} connected, {failed} failed");
         }
@@ -159,6 +170,63 @@ fn start_tui(cfg: Config) -> anyhow_noop::Result<()> {
 // Minimal error alias so main stays simple without pulling anyhow in.
 mod anyhow_noop {
     pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+}
+
+/// `luna --check`: validate config, provider resolution, and paths.
+fn check_setup() -> anyhow_noop::Result<()> {
+    println!("Luna {} — setup check", env!("CARGO_PKG_VERSION"));
+    println!();
+
+    let cfg_path = luna_core::config::config_path();
+    println!("config:      {}", cfg_path.display());
+    println!("  exists:    {}", cfg_path.exists());
+    println!(
+        "sessions:    {}",
+        luna_core::config::sessions_db_path().display()
+    );
+    println!("logs:        {}", luna_core::config::logs_dir().display());
+    println!();
+
+    let cfg = match Config::load() {
+        Ok(c) => c,
+        Err(e) => {
+            println!("CONFIG ERROR: {e}");
+            return Ok(());
+        }
+    };
+
+    println!("default_provider: {:?}", cfg.default_provider);
+    println!();
+    println!("providers:");
+    for entry in cfg.providers.entries() {
+        let mark = if entry.enabled {
+            "enabled "
+        } else {
+            "disabled"
+        };
+        let key = if entry.has_api_key {
+            "key:set"
+        } else {
+            "key:--"
+        };
+        println!("  {:<12} {mark}  {key}  model={}", entry.key, entry.model);
+    }
+    println!();
+
+    match luna_core::provider::resolver::resolve_active(&cfg) {
+        Some(r) => {
+            println!("ACTIVE PROVIDER: {} (model {})", r.key, r.model);
+            println!("  max_tokens:  {}", r.max_tokens);
+            println!("  temperature: {}", r.temperature);
+            println!();
+            println!("Ready. Run `luna` to start the TUI.");
+        }
+        None => {
+            println!("NO USABLE PROVIDER.");
+            println!("  Enable one with an API key, or run `luna --setup`.");
+        }
+    }
+    Ok(())
 }
 
 fn tracing_log_file() -> std::fs::File {
