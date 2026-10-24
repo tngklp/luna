@@ -186,7 +186,9 @@ impl UiEvent {
 
 /// Background task: forward core events to the webview.
 fn spawn_event_forwarder(app: AppHandle, bus: EventBus) {
-    tokio::spawn(async move {
+    // tauri::async_runtime owns the reactor; plain tokio::spawn would panic
+    // when called from setup (no ambient runtime).
+    tauri::async_runtime::spawn(async move {
         let mut rx = bus.subscribe();
         loop {
             match rx.recv().await {
@@ -244,17 +246,18 @@ struct CoreStack {
 
 /// Build the provider + registry + tools stack shared by all run commands.
 async fn build_stack(cfg: &luna_core::config::Config) -> Result<CoreStack, String> {
-    let (_key, provider, settings) = pick_provider(cfg).ok_or_else(|| {
-        "no provider enabled: set ANTHROPIC_API_KEY / OPENAI_API_KEY or enable ollama in config.toml".to_string()
+    let resolved = luna_core::provider::resolver::resolve_active(cfg).ok_or_else(|| {
+        "no usable provider: enable one in Settings (providers need an API key, except Ollama)"
+            .to_string()
     })?;
 
     let mut registry = AgentRegistry::new();
     registry.register_provider(
-        &_key,
+        &resolved.key,
         ProviderSettings {
-            model: settings.0.clone(),
-            max_tokens: settings.1,
-            temperature: settings.2,
+            model: resolved.model.clone(),
+            max_tokens: resolved.max_tokens,
+            temperature: resolved.temperature,
         },
     );
     let spec = if let Some(agent_cfg) = cfg.agents.first() {
@@ -265,13 +268,13 @@ async fn build_stack(cfg: &luna_core::config::Config) -> Result<CoreStack, Strin
     } else {
         AgentSpec {
             name: "assistant".into(),
-            provider_key: _key.clone(),
-            model: settings.0.clone(),
+            provider_key: resolved.key.clone(),
+            model: resolved.model.clone(),
             system: Some("You are Luna, a helpful coding agent.".into()),
             tools: vec![],
             max_iterations: 25,
-            max_tokens: settings.1,
-            temperature: settings.2,
+            max_tokens: resolved.max_tokens,
+            temperature: resolved.temperature,
         }
     };
 
@@ -287,7 +290,7 @@ async fn build_stack(cfg: &luna_core::config::Config) -> Result<CoreStack, Strin
     }
 
     Ok(CoreStack {
-        provider,
+        provider: resolved.provider,
         registry,
         tools,
         default_spec: spec,
@@ -507,51 +510,111 @@ impl CreationFlagsExt for std::process::Command {
     }
 }
 
-/// Resolved provider settings tuple: (model, max_tokens, temperature).
-type ProviderSettingsTuple = (String, u32, f32);
+// ---------- provider management (Settings UI) ----------
 
-fn pick_provider(
-    cfg: &luna_core::config::Config,
-) -> Option<(
-    String,
-    std::sync::Arc<dyn luna_core::provider::Provider>,
-    ProviderSettingsTuple,
-)> {
-    // Env-var API keys take precedence in provider selection order.
-    if cfg.providers.anthropic.enabled
-        && let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
-        && let Ok(p) = luna_core::provider::anthropic::AnthropicProvider::new(key)
-    {
-        let c = &cfg.providers.anthropic;
-        return Some((
-            "anthropic".into(),
-            std::sync::Arc::new(p),
-            (c.model.clone(), c.max_tokens, c.temperature),
-        ));
+/// List all configured providers for the settings panel.
+#[tauri::command]
+async fn luna_list_providers() -> Result<Vec<luna_core::config::ProviderEntry>, String> {
+    let cfg = luna_core::config::Config::load().map_err(|e| e.to_string())?;
+    Ok(cfg.providers.entries())
+}
+
+/// The currently active provider key.
+#[tauri::command]
+async fn luna_active_provider() -> Result<String, String> {
+    let cfg = luna_core::config::Config::load().map_err(|e| e.to_string())?;
+    Ok(cfg.active_provider_key().unwrap_or_default())
+}
+
+/// Enable/update a built-in provider and save the config.
+#[tauri::command]
+async fn luna_save_provider(
+    key: String,
+    enabled: bool,
+    model: String,
+    api_key: String,
+    base_url: String,
+) -> Result<(), String> {
+    let mut cfg = luna_core::config::Config::load().map_err(|e| e.to_string())?;
+    let pc = luna_core::config::ProviderConfig {
+        enabled,
+        model,
+        api_key,
+        base_url,
+        ..Default::default()
+    };
+    match key.as_str() {
+        "anthropic" => cfg.providers.anthropic = pc,
+        "openai" => cfg.providers.openai = pc,
+        "google" => cfg.providers.google = pc,
+        "xai" => cfg.providers.xai = pc,
+        "deepseek" => cfg.providers.deepseek = pc,
+        "mistral" => cfg.providers.mistral = pc,
+        "openrouter" => cfg.providers.openrouter = pc,
+        "groq" => cfg.providers.groq = pc,
+        other => return Err(format!("unknown built-in provider `{other}`")),
     }
-    if cfg.providers.openai.enabled
-        && let Ok(key) = std::env::var("OPENAI_API_KEY")
-        && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::openai(key)
-    {
-        let c = &cfg.providers.openai;
-        return Some((
-            "openai".into(),
-            std::sync::Arc::new(p),
-            (c.model.clone(), c.max_tokens, c.temperature),
-        ));
+    // First enabled provider becomes the default if none set.
+    if cfg.default_provider.is_empty() && enabled {
+        cfg.default_provider = key;
     }
-    if cfg.providers.ollama.enabled
-        && let Ok(p) =
-            luna_core::provider::ollama::OllamaProvider::new(&cfg.providers.ollama.base_url)
-    {
-        let c = &cfg.providers.ollama;
-        return Some((
-            "ollama".into(),
-            std::sync::Arc::new(p),
-            (c.model.clone(), c.max_tokens, c.temperature),
-        ));
+    cfg.save().map_err(|e| e.to_string())
+}
+
+/// Add or update a custom OpenAI-compatible provider.
+#[tauri::command]
+async fn luna_save_custom_provider(
+    key: String,
+    base_url: String,
+    model: String,
+    api_key: String,
+) -> Result<(), String> {
+    if key.is_empty() || key.contains('.') || key.contains(' ') {
+        return Err("provider key must be a non-empty name without spaces or dots".into());
     }
-    None
+    let mut cfg = luna_core::config::Config::load().map_err(|e| e.to_string())?;
+    cfg.providers.custom.insert(
+        key.clone(),
+        luna_core::config::CustomProviderConfig {
+            base_url,
+            api_key,
+            api_key_env: None,
+            model,
+            ..Default::default()
+        },
+    );
+    if cfg.default_provider.is_empty() {
+        cfg.default_provider = key;
+    }
+    cfg.save().map_err(|e| e.to_string())
+}
+
+/// Remove a custom provider.
+#[tauri::command]
+async fn luna_remove_custom_provider(key: String) -> Result<(), String> {
+    let mut cfg = luna_core::config::Config::load().map_err(|e| e.to_string())?;
+    cfg.providers.custom.remove(&key);
+    if cfg.default_provider == key {
+        cfg.default_provider = cfg
+            .providers
+            .entries()
+            .into_iter()
+            .find(|e| e.enabled)
+            .map(|e| e.key)
+            .unwrap_or_default();
+    }
+    cfg.save().map_err(|e| e.to_string())
+}
+
+/// Set the default provider.
+#[tauri::command]
+async fn luna_set_default_provider(key: String) -> Result<(), String> {
+    let mut cfg = luna_core::config::Config::load().map_err(|e| e.to_string())?;
+    if cfg.providers.get(&key).is_none() {
+        return Err(format!("unknown provider `{key}`"));
+    }
+    cfg.default_provider = key;
+    cfg.save().map_err(|e| e.to_string())
 }
 
 fn main() {
@@ -562,19 +625,14 @@ fn main() {
         )
         .init();
 
-    install_cli_shim();
-
     let bus = EventBus::default();
     let (tx, rx) = tokio::sync::mpsc::channel(256);
     let cancel = CancellationToken::new();
     let session_id = uuid::Uuid::new_v4();
 
-    // SQLite persistence: data dir from config, store attached to the bus.
+    // SQLite persistence: ~/.luna/sessions.db, store attached to the bus.
     let store = {
-        let data_dir = luna_core::config::Config::load()
-            .map(|c| c.storage.data_dir)
-            .unwrap_or_else(|_| std::path::PathBuf::from(".luna"));
-        let path = data_dir.join("sessions.db");
+        let path = luna_core::config::sessions_db_path();
         match luna_core::storage::Store::open(&path) {
             Ok(s) => Arc::new(s),
             Err(e) => {
@@ -599,13 +657,19 @@ fn main() {
         .setup(move |app| {
             let handle = app.handle().clone();
             spawn_event_forwarder(handle, bus);
+            // PATH registration in the background — never blocks window show.
+            tauri::async_runtime::spawn(async {
+                install_cli_shim();
+            });
             // Drain commands so senders never block; the run path is
             // `luna_run_agent`, this loop just mirrors events/cancel.
             let state: tauri::State<LunaState> = app.state();
             let bus2 = state.bus.clone();
             let cancel2 = state.cancel.clone();
             let sid2 = state.session_id;
-            tokio::spawn(async move {
+            // tauri::async_runtime has a tokio reactor; plain tokio::spawn
+            // would panic here (no ambient runtime during setup).
+            tauri::async_runtime::spawn(async move {
                 let mut rx = rx;
                 while let Some(cmd) = rx.recv().await {
                     match cmd {
@@ -638,7 +702,13 @@ fn main() {
             luna_run_agent,
             luna_run_plan,
             luna_list_sessions,
-            luna_load_session
+            luna_load_session,
+            luna_list_providers,
+            luna_active_provider,
+            luna_save_provider,
+            luna_save_custom_provider,
+            luna_remove_custom_provider,
+            luna_set_default_provider
         ])
         .run(tauri::generate_context!())
         .expect("error while running Luna");

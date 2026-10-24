@@ -1,12 +1,14 @@
 //! Luna TUI: terminal interface (ratatui + crossterm).
 
 mod app;
+mod setup;
 mod ui;
 
 use luna_core::config::Config;
 use luna_core::orchestrator::AgentRegistry;
 use luna_core::orchestrator::agent_loop::{AgentContext, AgentSpec, AutoApprove};
 use luna_core::orchestrator::registry::ProviderSettings;
+use luna_core::provider::resolver::resolve_active;
 use luna_core::provider::types::Message;
 use luna_core::tool::builtin;
 use luna_core::tool::permissions::PermissionGate;
@@ -56,21 +58,33 @@ fn run_app() -> anyhow_noop::Result<()> {
         .with_writer(std::sync::Mutex::new(log_file))
         .init();
 
+    // First run without a config -> interactive setup wizard.
+    if !luna_core::config::config_path().exists() {
+        setup::run_wizard()?;
+        // Reload after the wizard wrote the config.
+        let cfg = Config::load()?;
+        return start_tui(cfg);
+    }
+
     let cfg = Config::load()?;
-    let (provider_key, provider, settings) = pick_provider(&cfg).ok_or_else(|| {
+    start_tui(cfg)
+}
+
+fn start_tui(cfg: Config) -> anyhow_noop::Result<()> {
+    let resolved = resolve_active(&cfg).ok_or_else(|| {
         std::io::Error::other(
-            "no provider enabled: set ANTHROPIC_API_KEY / OPENAI_API_KEY or enable ollama in config.toml",
+            "no usable provider: run `luna setup`, or enable a provider with an API key in ~/.luna/config.toml",
         )
     })?;
 
     // Resolve the agent spec (first configured agent, or a default assistant).
     let mut registry = AgentRegistry::new();
     registry.register_provider(
-        &provider_key,
+        &resolved.key,
         ProviderSettings {
-            model: settings.0.clone(),
-            max_tokens: settings.1,
-            temperature: settings.2,
+            model: resolved.model.clone(),
+            max_tokens: resolved.max_tokens,
+            temperature: resolved.temperature,
         },
     );
     let spec = if let Some(agent_cfg) = cfg.agents.first() {
@@ -79,13 +93,13 @@ fn run_app() -> anyhow_noop::Result<()> {
     } else {
         AgentSpec {
             name: "assistant".into(),
-            provider_key: provider_key.clone(),
-            model: settings.0.clone(),
+            provider_key: resolved.key.clone(),
+            model: resolved.model.clone(),
             system: Some("You are Luna, a helpful coding agent.".into()),
             tools: vec![],
             max_iterations: 25,
-            max_tokens: settings.1,
-            temperature: settings.2,
+            max_tokens: resolved.max_tokens,
+            temperature: resolved.temperature,
         }
     };
 
@@ -109,7 +123,7 @@ fn run_app() -> anyhow_noop::Result<()> {
 
     // SQLite persistence (best-effort; failures degrade to no persistence).
     let store = {
-        let path = cfg.storage.data_dir.join("sessions.db");
+        let path = luna_core::config::sessions_db_path();
         match luna_core::storage::Store::open(&path) {
             Ok(s) => Arc::new(s),
             Err(e) => {
@@ -121,7 +135,7 @@ fn run_app() -> anyhow_noop::Result<()> {
     luna_core::storage::attach_store(&bus, store);
 
     let ctx = AgentContext {
-        provider,
+        provider: resolved.provider,
         tools,
         gate: Arc::new(PermissionGate::new(
             PermissionGate::default_rules(),
@@ -147,56 +161,8 @@ mod anyhow_noop {
     pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 }
 
-/// Resolved provider settings tuple: (model, max_tokens, temperature).
-pub type ProviderSettingsTuple = (String, u32, f32);
-
-fn pick_provider(
-    cfg: &Config,
-) -> Option<(
-    String,
-    Arc<dyn luna_core::provider::Provider>,
-    ProviderSettingsTuple,
-)> {
-    if cfg.providers.anthropic.enabled
-        && let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
-        && let Ok(p) = luna_core::provider::anthropic::AnthropicProvider::new(key)
-    {
-        let c = &cfg.providers.anthropic;
-        return Some((
-            "anthropic".into(),
-            Arc::new(p),
-            (c.model.clone(), c.max_tokens, c.temperature),
-        ));
-    }
-    if cfg.providers.openai.enabled
-        && let Ok(key) = std::env::var("OPENAI_API_KEY")
-        && let Ok(p) = luna_core::provider::openai_compat::OpenAiCompatProvider::openai(key)
-    {
-        let c = &cfg.providers.openai;
-        return Some((
-            "openai".into(),
-            Arc::new(p),
-            (c.model.clone(), c.max_tokens, c.temperature),
-        ));
-    }
-    if cfg.providers.ollama.enabled
-        && let Ok(p) =
-            luna_core::provider::ollama::OllamaProvider::new(&cfg.providers.ollama.base_url)
-    {
-        let c = &cfg.providers.ollama;
-        return Some((
-            "ollama".into(),
-            Arc::new(p),
-            (c.model.clone(), c.max_tokens, c.temperature),
-        ));
-    }
-    None
-}
-
 fn tracing_log_file() -> std::fs::File {
-    let dir = directories::ProjectDirs::from("dev", "luna", "Luna")
-        .map(|d| d.data_dir().join("logs"))
-        .unwrap_or_else(|| std::path::PathBuf::from(".luna/logs"));
+    let dir = luna_core::config::logs_dir();
     let _ = std::fs::create_dir_all(&dir);
     std::fs::OpenOptions::new()
         .create(true)

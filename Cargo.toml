@@ -44,6 +44,7 @@ thiserror = "2"
 
 # misc
 directories = "6"
+dirs = "6"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 glob = "0.3"

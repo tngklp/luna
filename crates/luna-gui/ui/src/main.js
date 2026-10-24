@@ -49,6 +49,7 @@ app.innerHTML = `
       <div id="agent-list" class="agent-list"><div class="agent-empty">no agents yet</div></div>
       <div class="sidebar-footer">
         <div id="status" class="status idle">idle</div>
+        <button id="settings-btn" class="settings-btn" title="Settings">⚙ Settings</button>
       </div>
     </aside>
     <main class="chat">
@@ -59,6 +60,7 @@ app.innerHTML = `
         </div>
       </div>
       <div id="agent-panel" class="agent-panel hidden"></div>
+      <div id="settings-panel" class="settings-panel hidden"></div>
       <div id="approval" class="approval hidden"></div>
       <form id="composer" class="composer">
         <textarea id="input" placeholder="Message Luna…  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
@@ -76,6 +78,124 @@ const statusEl = document.getElementById("status");
 const approvalEl = document.getElementById("approval");
 const agentListEl = document.getElementById("agent-list");
 const agentPanelEl = document.getElementById("agent-panel");
+const settingsPanelEl = document.getElementById("settings-panel");
+document.getElementById("settings-btn").onclick = () => toggleSettings();
+
+// ---------- settings / providers ----------
+const PROVIDER_LABELS = {
+  anthropic: "Anthropic (Claude)",
+  openai: "OpenAI",
+  google: "Google Gemini",
+  xai: "xAI (Grok)",
+  deepseek: "DeepSeek",
+  mistral: "Mistral",
+  openrouter: "OpenRouter",
+  groq: "Groq",
+};
+
+async function toggleSettings() {
+  if (!settingsPanelEl.classList.contains("hidden")) {
+    settingsPanelEl.classList.add("hidden");
+    return;
+  }
+  settingsPanelEl.classList.remove("hidden");
+  settingsPanelEl.innerHTML = "<div class='settings-loading'>Loading…</div>";
+  try {
+    const [providers, active] = await Promise.all([
+      invoke("luna_list_providers"),
+      invoke("luna_active_provider"),
+    ]);
+    renderSettings(providers, active);
+  } catch (err) {
+    settingsPanelEl.innerHTML = `<div class="system-error">${DOMPurify.sanitize(String(err))}</div>`;
+  }
+}
+
+function renderSettings(providers, active) {
+  const rows = providers
+    .map(
+      (p) => `
+    <div class="provider-row" data-key="${DOMPurify.sanitize(p.key)}">
+      <div class="provider-head">
+        <label class="switch">
+          <input type="checkbox" class="p-enabled" ${p.enabled ? "checked" : ""}/>
+          <span class="slider"></span>
+        </label>
+        <strong>${DOMPurify.sanitize(PROVIDER_LABELS[p.key] || p.key)}</strong>
+        ${active === p.key ? `<span class="default-badge">default</span>` : ""}
+        <button class="p-set-default link-btn" data-key="${DOMPurify.sanitize(p.key)}">set default</button>
+      </div>
+      <div class="provider-fields">
+        <input class="p-model" placeholder="model" value="${DOMPurify.sanitize(p.model || "")}"/>
+        <input class="p-key" type="password" placeholder="API key${p.has_api_key ? " (saved)" : ""}" />
+        <button class="p-save primary-btn" data-key="${DOMPurify.sanitize(p.key)}">Save</button>
+      </div>
+    </div>`
+    )
+    .join("");
+
+  settingsPanelEl.innerHTML = `
+    <div class="settings-header">
+      <strong>Providers</strong>
+      <button id="settings-close" class="link-btn">close</button>
+    </div>
+    <div class="settings-note">Keys are stored in ~/.luna/config.toml. Env vars (e.g. OPENAI_API_KEY) are used when no key is set here.</div>
+    ${rows}
+    <div class="settings-header custom-header"><strong>Custom OpenAI-compatible provider</strong></div>
+    <div class="provider-fields custom-fields">
+      <input id="c-key" placeholder="name (e.g. my_llama)"/>
+      <input id="c-url" placeholder="base URL (…/v1)"/>
+      <input id="c-model" placeholder="model"/>
+      <input id="c-api-key" type="password" placeholder="API key (optional)"/>
+      <button id="c-save" class="primary-btn">Add</button>
+    </div>`;
+
+  document.getElementById("settings-close").onclick = () =>
+    settingsPanelEl.classList.add("hidden");
+
+  settingsPanelEl.querySelectorAll(".p-save").forEach((btn) => {
+    btn.onclick = async () => {
+      const key = btn.dataset.key;
+      const row = settingsPanelEl.querySelector(`.provider-row[data-key="${key}"]`);
+      try {
+        await invoke("luna_save_provider", {
+          key,
+          enabled: row.querySelector(".p-enabled").checked,
+          model: row.querySelector(".p-model").value.trim(),
+          apiKey: row.querySelector(".p-key").value.trim(),
+          baseUrl: "",
+        });
+        btn.textContent = "Saved ✓";
+        setTimeout(() => (btn.textContent = "Save"), 1200);
+      } catch (err) {
+        btn.textContent = String(err).slice(0, 40);
+      }
+    };
+  });
+
+  settingsPanelEl.querySelectorAll(".p-set-default").forEach((btn) => {
+    btn.onclick = async () => {
+      await invoke("luna_set_default_provider", { key: btn.dataset.key });
+      toggleSettings(); // re-render
+      toggleSettings();
+    };
+  });
+
+  document.getElementById("c-save").onclick = async () => {
+    try {
+      await invoke("luna_save_custom_provider", {
+        key: document.getElementById("c-key").value.trim(),
+        baseUrl: document.getElementById("c-url").value.trim(),
+        model: document.getElementById("c-model").value.trim(),
+        apiKey: document.getElementById("c-api-key").value.trim(),
+      });
+      toggleSettings();
+      toggleSettings();
+    } catch (err) {
+      alert(String(err));
+    }
+  };
+}
 
 // ---------- agent dashboard state ----------
 const agents = new Map(); // id -> {parent, status, lastOutput, toolCalls}
