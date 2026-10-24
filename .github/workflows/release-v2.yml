@@ -94,14 +94,14 @@ jobs:
         run: |
           cargo install tauri-cli --version '^2' --locked
           cargo tauri build --target ${{ matrix.target }}
-      - name: Upload GUI artifact (Windows: NSIS installer)
+      - name: "Upload GUI artifact (Windows NSIS installer)"
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: gui-${{ matrix.target }}
           path: target/*/release/bundle/nsis/*.exe
           if-no-files-found: error
-      - name: Upload GUI artifact (macOS: DMG)
+      - name: "Upload GUI artifact (macOS DMG)"
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
