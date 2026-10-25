@@ -580,24 +580,73 @@ pub fn set_models_config(
 
 #[tauri::command]
 pub fn get_update_state() -> UpdateStateDto {
-    // Luna ships through the platform installers, so there is no in-app updater
-    // to report on. The toast stays hidden.
     UpdateStateDto::idle()
 }
 
 #[tauri::command]
-pub fn check_for_updates() -> UpdateStateDto {
-    UpdateStateDto::idle()
+pub async fn check_for_updates() -> UpdateStateDto {
+    crate::update::check(luna_core::VERSION).await
 }
 
 #[tauri::command]
 pub fn download_update() -> UpdateStateDto {
+    // Luna installs through the platform installers, so there is nothing to
+    // download in-app; the UI opens the release page instead.
     UpdateStateDto::idle()
 }
 
 #[tauri::command]
 pub fn install_update() -> Result<(), String> {
     Ok(())
+}
+
+/// The release page for a version, so the UI can open it.
+#[tauri::command]
+pub fn update_url(tag: String) -> String {
+    crate::update::download_url(&tag)
+}
+
+#[tauri::command]
+pub fn get_extensions(state: Shared<'_>) -> serde_json::Value {
+    let cwd = state.cwd.lock().map(|cwd| cwd.clone()).unwrap_or_default();
+    let extensions = luna_core::extensions::Extensions::load(&cwd, &state.paths.root);
+    let config = state.config.lock().map(|config| config.clone()).unwrap_or_default();
+
+    json!({
+        "skills": extensions.skills.iter().map(|skill| json!({
+            "name": skill.name,
+            "description": skill.description,
+            "path": skill.path.display().to_string(),
+        })).collect::<Vec<_>>(),
+        "commands": extensions.commands.iter().map(|command| json!({
+            "name": command.name,
+            "description": command.description,
+            "path": command.path.display().to_string(),
+        })).collect::<Vec<_>>(),
+        "hooks": extensions.hooks.iter().map(|hook| json!({
+            "event": hook.event.as_str(),
+            "command": hook.command,
+            "path": hook.path.display().to_string(),
+        })).collect::<Vec<_>>(),
+        "plugins": extensions.plugins.iter().map(|plugin| json!({
+            "name": plugin.name,
+            "description": plugin.description,
+            "version": plugin.version,
+            "path": plugin.path.display().to_string(),
+        })).collect::<Vec<_>>(),
+        // Connecting to every server on each settings open would be slow, so the
+        // list reports what is configured; `doctor` checks reachability.
+        "mcp": config.mcp.iter().map(|server| json!({
+            "name": server.name,
+            "transport": match &server.transport {
+                luna_core::mcp::Transport::Stdio { .. } => "stdio",
+                luna_core::mcp::Transport::Http { .. } => "http",
+            },
+            "tools": 0,
+            "error": null,
+        })).collect::<Vec<_>>(),
+        "problems": extensions.problems,
+    })
 }
 
 /// A JSON snapshot of the state, for debugging from the devtools console.

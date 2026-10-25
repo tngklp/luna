@@ -100,6 +100,10 @@ export interface LunaApi {
   revealPath(path: string): Promise<void>
   /** Read a file as text, for attachments dropped from the file manager. */
   readFile(path: string): Promise<FsFileDto>
+  /** The release page for a version. */
+  updateUrl(tag: string): Promise<string>
+  /** Skills, commands, hooks, plugins and MCP servers found on disk. */
+  getExtensions(): Promise<unknown>
   getUpdateState(): Promise<UpdateStateDto>
   checkForUpdates(): Promise<UpdateStateDto>
   downloadUpdate(): Promise<UpdateStateDto>
@@ -163,6 +167,8 @@ export const luna: LunaApi = {
   setModelsConfig: (config) => invoke('set_models_config', { config }),
   revealPath: (path) => invoke('reveal_path', { path }),
   readFile: (path) => invoke('read_file', { path }),
+  updateUrl: (tag) => invoke('update_url', { tag }),
+  getExtensions: () => invoke('get_extensions'),
 
   getUpdateState: () => invoke('get_update_state'),
   checkForUpdates: () => invoke('check_for_updates'),

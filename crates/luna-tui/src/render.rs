@@ -28,10 +28,7 @@ pub enum DiffKind {
 pub fn parse_diff(text: &str) -> Vec<DiffLine> {
     let mut out = Vec::new();
     for line in text.lines() {
-        let kind = if line.starts_with("+++")
-            || line.starts_with("---")
-            || line.starts_with("@@")
-        {
+        let kind = if line.starts_with("+++") || line.starts_with("---") || line.starts_with("@@") {
             DiffKind::Header
         } else if line.starts_with('+') {
             DiffKind::Added
@@ -241,9 +238,7 @@ impl Editor {
             return;
         };
         let next_start = line_end + 1;
-        let next_len = self.text[next_start..]
-            .find('\n')
-            .unwrap_or(self.text.len() - next_start);
+        let next_len = self.text[next_start..].find('\n').unwrap_or(self.text.len() - next_start);
         self.cursor = next_start + column.min(next_len);
         while self.cursor > next_start && !self.text.is_char_boundary(self.cursor) {
             self.cursor -= 1;

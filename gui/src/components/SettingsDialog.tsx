@@ -1,5 +1,6 @@
 import { useLuna, type SettingsTab } from '../store'
 import { CustomizationSettings } from './settings/CustomizationSettings'
+import { ExtensionsSettings } from './settings/ExtensionsSettings'
 import { GeneralSettings } from './settings/GeneralSettings'
 import { ModelsSettings } from './settings/ModelsSettings'
 import { ToolsSettings } from './settings/ToolsSettings'
@@ -8,7 +9,8 @@ const TABS: { id: SettingsTab; label: string; hint: string }[] = [
   { id: 'general', label: 'General', hint: 'App and runtime defaults' },
   { id: 'models', label: 'Models', hint: 'Providers and models' },
   { id: 'customization', label: 'Customization', hint: 'Theme and appearance' },
-  { id: 'tools', label: 'Tools', hint: 'Approval policy' }
+  { id: 'tools', label: 'Tools', hint: 'Approval policy' },
+  { id: 'extensions', label: 'Extensions', hint: 'Skills, hooks and MCP' }
 ]
 
 /**
@@ -48,6 +50,7 @@ export function SettingsDialog() {
           {tab === 'customization' ? <CustomizationSettings /> : null}
           {tab === 'models' ? <ModelsSettings /> : null}
           {tab === 'tools' ? <ToolsSettings /> : null}
+          {tab === 'extensions' ? <ExtensionsSettings /> : null}
         </div>
       </div>
     </div>

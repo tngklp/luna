@@ -2380,6 +2380,7 @@ dependencies = [
  "chrono",
  "luna-core",
  "mimalloc",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",

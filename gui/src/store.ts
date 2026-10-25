@@ -32,7 +32,7 @@ import { loadUiPreferences, saveUiPreferences, type UiPreferences } from './lib/
  */
 
 export type MainTab = 'chat' | 'changes'
-export type SettingsTab = 'general' | 'models' | 'customization' | 'tools'
+export type SettingsTab = 'general' | 'models' | 'customization' | 'tools' | 'extensions'
 export type SessionFilter = 'all' | 'running' | 'starred'
 
 interface StreamingState {
@@ -187,6 +187,8 @@ interface LunaState {
   checkForUpdates: () => Promise<void>
   downloadUpdate: () => Promise<void>
   installUpdate: () => void
+  /** Open the release page for a version. */
+  openUpdatePage: (tag: string) => void
   loadSessions: () => Promise<void>
   loadCommands: () => Promise<void>
   switchSession: (path: string) => Promise<void>
@@ -594,6 +596,10 @@ export const useLuna = create<LunaState>()((set, get) => ({
 
   installUpdate: () => {
     void window.luna.installUpdate()
+  },
+
+  openUpdatePage: (tag) => {
+    void window.luna.updateUrl(tag).then((url) => window.luna.revealPath(url))
   },
 
   loadSessions: async () => {

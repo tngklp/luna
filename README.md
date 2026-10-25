@@ -200,8 +200,12 @@ luna
 | `Esc` | Abort the running turn, or close the palette |
 | `Ctrl+C` | Quit |
 | `Ctrl+N` | New session |
-| `Ctrl+S` | Toggle the session list |
+| `Ctrl+S` | Session picker |
+| `Ctrl+A` | Toggle the agents pane |
+| `Ctrl+P` | Toggle plan mode |
+| `Ctrl+Y` | Copy the transcript |
 | `Ctrl+L` | Clear the transcript |
+| `Ctrl+W` / `Ctrl+U` | Delete a word / to line start |
 | `PgUp` / `PgDn` | Scroll |
 | `y` / `a` / `n` | Answer an approval prompt |
 
@@ -221,13 +225,33 @@ by the arrow keys, `Tab` to complete and `Enter` to run.
 | `/quit` | Exit |
 
 The header shows the model and where the config came from; the status bar shows
-the run state, thinking level, context usage, tokens and cost.
+the run state, thinking level, context usage, tokens, cost and a per-turn
+sparkline.
+
+### Headless
+
+```sh
+luna -p "explain src/main.rs"          # print the answer
+luna -p "fix the tests" --json         # one JSON object per event
+luna -p "bump the version" --yes       # approve tools without asking
+luna doctor                            # check config, providers, extensions
+```
+
+`--resume [path]` reopens a session, and `--theme <name>` picks a palette.
 
 ### Desktop
 
 The GUI is the chat surface from [PiUI](https://github.com/tngklp/piui), ported
-to Tauri. It opens straight into the chat. `Ctrl+N` starts a session, `Ctrl+K`
-searches, and the composer switches to steering while a turn is running.
+to Tauri. It opens straight into the chat.
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+N` | New session |
+| `Ctrl+K` | Search sessions |
+| `Ctrl+P` | Command palette |
+| `Ctrl+B` | Toggle the sidebar |
+| `` Ctrl+` `` | Toggle the terminal |
+| `?` | Shortcut sheet |
 
 **New session** only opens a fresh chat window — the transcript is written when
 you send the first prompt, so an abandoned draft leaves nothing behind.
@@ -240,6 +264,7 @@ Settings live behind the gear at the bottom of the sidebar:
 | Models | Providers, base URLs, key variables, protocols, and model definitions |
 | Customization | Theme and icon pack |
 | Tools | Approval policy, per tool class |
+| Extensions | Skills, commands, hooks, plugins and MCP servers |
 
 ## How it works
 
@@ -291,13 +316,72 @@ cost — which the parent sees as a message. No free-form parsing.
 | `write` | write | Create or replace a file |
 | `edit` | write | Replace one exact occurrence |
 | `multi_edit` | write | Several replacements, all or nothing |
+| `apply_patch` | write | Apply a unified diff |
 | `ls` | read | List a directory |
 | `glob` | read | Find files by pattern |
 | `grep` | read | Search contents with a regex |
 | `bash` | bash | Run a shell command |
+| `git` | bash | status, diff, log, commit, branch, stash |
+| `python_repl` | bash | A persistent Python interpreter |
+| `web_fetch` | network | Fetch a URL as readable text |
+| `web_search` | network | Search the web |
+| `read_pdf` | read | Extract text from a PDF |
+| `ask_user` | read | Ask the user a question |
+| `submit_result` | read | End a subagent with a report |
 | `todo_write` / `todo_read` | write / read | The task board |
 
 Approval is per class, so `read` can be allowed while `bash` always asks.
+
+### Extensions
+
+Four kinds of file extend Luna without a rebuild. Each is read from `./.luna/`
+first, then `~/.luna/`, so a repository can ship its own.
+
+| Kind | Location | What it does |
+|---|---|---|
+| Skills | `skills/*.md` | Instructions the agent can pull in; listed in the system prompt |
+| Commands | `commands/*.md` | Slash commands; `$ARGUMENTS` is substituted |
+| Hooks | `hooks/*.md` | Shell commands on `session_start`, `session_end`, `pre_tool`, `post_tool`, `pre_prompt` |
+| Plugins | `plugins/<name>/plugin.json` | A manifest with an optional command |
+
+A skill or command is a markdown file with frontmatter:
+
+```markdown
+---
+name: review
+description: Review a change for correctness
+---
+
+Read the diff, then check each hunk against the surrounding code.
+```
+
+### MCP
+
+Luna speaks the Model Context Protocol over stdio and HTTP. Add a server to
+`~/.luna/config.toml`:
+
+```toml
+[[mcp]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+
+[[mcp]]
+name = "docs"
+transport = "http"
+url = "https://example.com/mcp"
+require_approval = false
+```
+
+Its tools appear to the agent as `<server>__<tool>`. A server that fails to start
+is reported and skipped, so one broken server cannot stop Luna.
+
+### Checkpoints and workflows
+
+A checkpoint copies the workspace before a turn, so an aggressive edit is safe to
+try. Workflows are named, dependency-ordered step lists saved under
+`~/.luna/workflows/` and resumable after a failure.
 
 ### Sessions
 

@@ -358,6 +358,15 @@ export function createMockApi(): LunaApi {
 
     revealPath: async () => undefined,
     readFile: async (path: string) => ({ path, content: '', error: null }),
+    updateUrl: async (tag: string) => `https://github.com/tngklp/luna/releases/tag/${tag}`,
+    getExtensions: async () => ({
+      skills: [],
+      commands: [],
+      hooks: [],
+      plugins: [],
+      mcp: [],
+      problems: []
+    }),
 
     getUpdateState: async () => idleUpdate,
     checkForUpdates: async () => idleUpdate,

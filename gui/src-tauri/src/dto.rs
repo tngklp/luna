@@ -551,6 +551,37 @@ impl UpdateStateDto {
             error: None,
         }
     }
+
+    pub fn up_to_date(current: &str) -> Self {
+        UpdateStateDto {
+            phase: "up-to-date".to_string(),
+            version: Some(current.to_string()),
+            notes: None,
+            error: None,
+        }
+    }
+
+    pub fn available(tag: &str, notes: String, current: &str) -> Self {
+        UpdateStateDto {
+            phase: "available".to_string(),
+            version: Some(tag.to_string()),
+            notes: Some(if notes.is_empty() {
+                format!("Luna {tag} is available. You are on {current}.")
+            } else {
+                notes
+            }),
+            error: None,
+        }
+    }
+
+    pub fn error(message: String) -> Self {
+        UpdateStateDto {
+            phase: "error".to_string(),
+            version: None,
+            notes: None,
+            error: Some(message),
+        }
+    }
 }
 
 /// The thinking levels the picker offers.

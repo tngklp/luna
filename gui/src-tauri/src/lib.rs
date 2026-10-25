@@ -8,6 +8,7 @@ mod commands;
 mod dto;
 mod state;
 mod terminal;
+mod update;
 
 use std::sync::Arc;
 
@@ -78,7 +79,9 @@ pub fn run() {
             commands::check_for_updates,
             commands::download_update,
             commands::install_update,
+            commands::update_url,
             commands::debug_snapshot,
+            commands::get_extensions,
             commands::terminal_start,
             commands::terminal_write,
             commands::terminal_stop,
