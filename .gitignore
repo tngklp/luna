@@ -1,0 +1,19 @@
+/target
+**/target
+node_modules
+gui/node_modules
+gui/dist
+gui/src-tauri/gen
+gui/src-tauri/target
+.DS_Store
+*.log
+/dist
+.env
+.env.*
+
+# Generated icon manifests and SVGs (regenerate with npm run icons)
+gui/src/lib/material-icons.json
+gui/src/lib/catppuccin-icons.json
+gui/public/material-icons
+gui/public/catppuccin-icons
+gui/src-tauri/binaries

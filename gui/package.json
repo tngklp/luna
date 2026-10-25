@@ -1,0 +1,46 @@
+{
+  "name": "luna-gui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Luna — desktop GUI for the Luna coding agent",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "icons": "node ../scripts/sync-material-icons.mjs && node ../scripts/sync-catppuccin-icons.mjs",
+    "predev": "npm run icons",
+    "prebuild": "npm run icons",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "@fontsource/onest": "5.3.1",
+    "@tauri-apps/api": "^2.9.0",
+    "highlight.js": "11.12.0",
+    "katex": "0.19.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-markdown": "10.1.0",
+    "rehype-highlight": "7.0.2",
+    "rehype-katex": "7.0.1",
+    "remark-gfm": "4.0.1",
+    "remark-math": "6.0.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@iconify-json/catppuccin": "^1.2.17",
+    "@tauri-apps/cli": "^2.9.0",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "material-icon-theme": "^5.39.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.7"
+  }
+}

@@ -1,0 +1,202 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release, e.g. v0.1.0'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The TUI archives are what install.ps1 and install.sh download, so they are
+  # built first and published as their own artifacts.
+  tui:
+    name: TUI (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Build
+        run: cargo build --release -p luna-tui --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="luna-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/luna" "dist/$name/"
+          cp README.md LICENSE "dist/$name/" 2>/dev/null || true
+          tar -czf "dist/$name.tar.gz" -C dist "$name"
+          rm -rf "dist/$name"
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "luna-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/luna.exe" "dist/$name/"
+          Copy-Item README.md, LICENSE "dist/$name/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip" -Force
+          Remove-Item -Recurse -Force "dist/$name"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tui-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  # The desktop app: NSIS + MSI on Windows, deb + AppImage on Linux, dmg on macOS.
+  gui:
+    name: GUI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: ''
+          - os: ubuntu-latest
+            args: ''
+          - os: macos-latest
+            args: '--target universal-apple-darwin'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: gui/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'gui/src-tauri -> target'
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies
+        working-directory: gui
+        run: npm ci
+
+      - name: Generate icon manifests
+        working-directory: gui
+        run: |
+          node ../scripts/sync-material-icons.mjs
+          node ../scripts/sync-catppuccin-icons.mjs
+
+      # The installer ships the TUI as a sidecar, so it has to exist first.
+      - name: Build the TUI sidecar
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            cargo build --release -p luna-tui --target aarch64-apple-darwin
+            cargo build --release -p luna-tui --target x86_64-apple-darwin
+            node scripts/stage-tui.mjs --triple aarch64-apple-darwin
+          else
+            cargo build --release -p luna-tui
+            node scripts/stage-tui.mjs
+          fi
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: gui
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Luna ${{ github.ref_name }}'
+          releaseBody: |
+            Luna ${{ github.ref_name }}
+
+            **Desktop app** — download the installer for your platform below.
+            It installs both the GUI and the `luna` terminal command.
+
+            **Terminal only** — run the installer script:
+
+            ```powershell
+            irm https://raw.githubusercontent.com/tngklp/luna/main/install.ps1 | iex
+            ```
+
+            ```sh
+            curl -fsSL https://raw.githubusercontent.com/tngklp/luna/main/install.sh | sh
+            ```
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  # Attach the TUI archives and a single checksums file to the release the GUI
+  # job created, so the install scripts have something to verify against.
+  publish:
+    name: Publish TUI archives
+    needs: [tui, gui]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: tui-*
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          sha256sum *.tar.gz *.zip > checksums.txt 2>/dev/null || sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          gh release upload "$tag" artifacts/* --clobber --repo "${{ github.repository }}"

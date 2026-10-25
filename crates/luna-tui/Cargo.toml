@@ -1,0 +1,33 @@
+[package]
+name = "luna-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Luna terminal user interface"
+
+[[bin]]
+name = "luna"
+path = "src/main.rs"
+
+[dependencies]
+luna-core = { workspace = true }
+
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+crossterm.workspace = true
+directories.workspace = true
+futures-util.workspace = true
+mimalloc.workspace = true
+once_cell.workspace = true
+pulldown-cmark.workspace = true
+ratatui.workspace = true
+serde_json.workspace = true
+syntect.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
