@@ -229,7 +229,7 @@ Two stores, each doing what it is good at:
 ## Development
 
 ```sh
-cargo test --workspace          # 114 tests
+cargo test --workspace          # 118 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 
@@ -243,6 +243,101 @@ npm run check                   # type-check the Rust backend
 
 `npm run dev` serves the renderer with a mock core, which is how the chat surface
 is developed without rebuilding Rust.
+
+### Testing locally
+
+There are three ways to run Luna, in increasing order of realism.
+
+#### 1. The GUI in a browser — no Rust, no API key
+
+```sh
+cd gui
+npm install
+npm run dev            # http://localhost:5273
+```
+
+This runs the real renderer against [a mock core](gui/src/lib/mock.ts). The mock
+streams a canned reply with a code block and a bash tool card, so the transcript,
+markdown, composer and status footer all exercise their real code paths. Use it
+for layout and styling work — it never touches the network.
+
+#### 2. The TUI
+
+```sh
+cargo run -p luna-tui            # debug build, fastest to iterate
+cargo run --release -p luna-tui  # what users get
+```
+
+The TUI needs a provider to answer. With no key configured it still starts, and
+the first message reports the provider error — enough to check the layout, the
+composer, `/help`, and the approval prompt.
+
+#### 3. The real desktop app
+
+```sh
+cd gui
+npm run tauri:dev
+```
+
+This builds the Rust backend, starts Vite, and opens the window with hot reload
+for the frontend. Rust changes trigger a rebuild and restart.
+
+### Giving it a model
+
+Any one of these is enough.
+
+**A local model — no key, no cost.** Start [Ollama](https://ollama.com) and pull
+something:
+
+```sh
+ollama pull llama3.2
+```
+
+The default config already points the `local` provider at
+`http://localhost:11434/v1`, so switch to it:
+
+```sh
+luna --model local/llama3.2
+```
+
+or set it in `config.toml`:
+
+```toml
+[general]
+default_model = "local/llama3.2"
+```
+
+**A hosted provider.** Set the key for whichever provider you want, then restart:
+
+```powershell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."   # current shell only
+[Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY', 'sk-ant-...', 'User')  # persistent
+```
+
+```sh
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+`OPENAI_API_KEY` and `GEMINI_API_KEY` work the same way. The default model is
+`anthropic/claude-sonnet-4-5`; change `default_model` in `config.toml` to use
+another.
+
+To confirm what Luna can see:
+
+```sh
+luna --help          # prints the config path it reads
+```
+
+### Checking the agent without a UI
+
+The engine is a library, so the fastest way to exercise the loop, tools and
+orchestrator is the test suite — it drives a scripted provider, so it needs no
+network and no key:
+
+```sh
+cargo test -p luna-core                    # 105 tests
+cargo test -p luna-core --test agent_loop  # the loop and orchestrator end to end
+```
 
 ### The TUI sidecar
 

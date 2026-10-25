@@ -43,6 +43,8 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let model_override = parse_model(&args)?;
+
     let paths = Paths::resolve();
     paths.ensure()?;
 
@@ -54,7 +56,10 @@ fn main() -> Result<()> {
         .with_writer(std::io::sink)
         .init();
 
-    let config = Config::load_or_default(&paths);
+    let mut config = Config::load_or_default(&paths);
+    if let Some(model) = model_override {
+        config.general.default_model = model;
+    }
     let store = SessionStore::open(&paths.data_dir)?;
     let providers = Arc::new(ProviderRegistry::new(&config));
 
@@ -91,8 +96,9 @@ USAGE
     luna [OPTIONS]
 
 OPTIONS
-    -h, --help       Show this help
-    -V, --version    Print the version
+    -m, --model <ref>   Model to run, as provider/model (e.g. local/llama3.2)
+    -h, --help          Show this help
+    -V, --version       Print the version
 
 KEYS
     Enter            Send the message
@@ -111,4 +117,60 @@ CONFIG
         version = luna_core::VERSION,
         config = Paths::resolve().config_file().display()
     );
+}
+
+/// Read `--model <ref>` or `--model=<ref>`.
+///
+/// A bare model name is accepted too: `Config::split_model` treats it as a local
+/// model, so `luna -m llama3.2` does the obvious thing.
+fn parse_model(args: &[String]) -> Result<Option<String>> {
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--model" || arg == "-m" {
+            let value = args.get(index + 1).ok_or_else(|| {
+                anyhow::anyhow!("--model needs a value, e.g. --model local/llama3.2")
+            })?;
+            return Ok(Some(value.clone()));
+        }
+        if let Some(value) = arg.strip_prefix("--model=") {
+            return Ok(Some(value.to_string()));
+        }
+        index += 1;
+    }
+    Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn reads_a_separate_model_argument() {
+        assert_eq!(
+            parse_model(&args(&["--model", "local/x"])).unwrap().as_deref(),
+            Some("local/x")
+        );
+        assert_eq!(parse_model(&args(&["-m", "local/x"])).unwrap().as_deref(), Some("local/x"));
+    }
+
+    #[test]
+    fn reads_an_inline_model_argument() {
+        assert_eq!(parse_model(&args(&["--model=local/x"])).unwrap().as_deref(), Some("local/x"));
+    }
+
+    #[test]
+    fn no_model_flag_means_no_override() {
+        assert!(parse_model(&args(&[])).unwrap().is_none());
+        assert!(parse_model(&args(&["--help"])).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_missing_value_is_an_error() {
+        assert!(parse_model(&args(&["--model"])).is_err());
+    }
 }
