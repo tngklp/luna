@@ -86,7 +86,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
 
 fn composer_height(app: &App) -> u16 {
     let lines = app.editor.text().lines().count().max(1) as u16;
-    (lines + 2).min(10)
+    // Attachments get one row above the input.
+    let attachments = if app.attachments.is_empty() { 0 } else { 1 };
+    (lines + 2 + attachments).min(12)
 }
 
 /// The top bar: what this is, which model, and where the config came from.
@@ -590,11 +592,26 @@ fn draw_composer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         Span::styled(app.editor.text().to_string(), Style::default().fg(theme.text))
     };
-    frame.render_widget(Paragraph::new(TextLine::from(text)).wrap(Wrap { trim: false }), inner);
+
+    // Attachments sit above the input, so it is obvious what will be sent.
+    let mut lines: Vec<TextLine> = Vec::new();
+    if !app.attachments.is_empty() {
+        let mut spans = vec![Span::styled("  ⧉ ", Style::default().fg(theme.accent))];
+        for (index, attachment) in app.attachments.iter().enumerate() {
+            if index > 0 {
+                spans.push(Span::styled("  ", Style::default()));
+            }
+            spans.push(Span::styled(attachment.label(), Style::default().fg(theme.muted)));
+        }
+        lines.push(TextLine::from(spans));
+    }
+    lines.push(TextLine::from(text));
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 
     // Place the cursor where the user is typing.
     if app.mode == Mode::Normal {
-        let row = app.editor.row() as u16;
+        let row = app.editor.row() as u16 + if app.attachments.is_empty() { 0 } else { 1 };
         let column = app.editor.column() as u16;
         let x = inner.x + column.min(inner.width.saturating_sub(1));
         let y = inner.y + row.min(inner.height.saturating_sub(1));

@@ -408,6 +408,15 @@ fn parse_usage(value: &Value) -> Usage {
     }
 }
 
+/// Expose the message encoder to integration tests.
+///
+/// The encoder is the part that decides what a provider actually receives, so
+/// it is worth asserting on directly rather than only through a mock transport.
+#[doc(hidden)]
+pub fn encode_for_test(message: &crate::types::Message) -> serde_json::Value {
+    encode_message(message).unwrap_or(serde_json::Value::Null)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -126,6 +126,8 @@ pub struct App {
     pub context_percent: f32,
     /// Tokens used per turn, for the sparkline.
     pub turn_tokens: Vec<u64>,
+    /// Images attached to the next message.
+    pub attachments: Vec<crate::image::Attachment>,
     /// Where the config was read from, shown in the header.
     pub config_path: String,
     /// The theme directory, for `--theme`.
@@ -213,6 +215,7 @@ impl App {
             cost: 0.0,
             context_percent: 0.0,
             turn_tokens: Vec::new(),
+            attachments: Vec::new(),
             config_path,
             theme_dir,
             config,
@@ -610,7 +613,9 @@ impl App {
     /// Send the composer contents.
     fn submit(&mut self) {
         let text = self.editor.text().trim().to_string();
-        if text.is_empty() {
+        // An image on its own is a valid message; empty text with nothing
+        // attached is not.
+        if text.is_empty() && self.attachments.is_empty() {
             return;
         }
         self.editor.clear();
@@ -619,6 +624,18 @@ impl App {
         if text.starts_with('/') {
             self.run_command(&text);
             return;
+        }
+
+        // A path typed into the message is attached rather than sent as text.
+        let mut attachments = std::mem::take(&mut self.attachments);
+        for path in crate::image::extract_paths(&text) {
+            if attachments.iter().any(|existing| existing.path == path) {
+                continue;
+            }
+            match crate::image::load(&path) {
+                Ok(attachment) => attachments.push(attachment),
+                Err(err) => self.lines.push(Line::Error(err)),
+            }
         }
 
         // While a turn is running, a message steers it instead of starting one.
@@ -632,6 +649,12 @@ impl App {
         }
 
         self.lines.push(Line::User(text.clone()));
+        for attachment in &attachments {
+            self.lines.push(Line::Notice {
+                level: "info".into(),
+                text: format!("attached {}", attachment.label()),
+            });
+        }
         self.follow = true;
         self.scroll = 0;
         self.running = true;
@@ -639,24 +662,35 @@ impl App {
         self.dirty = true;
 
         // Plan mode restricts the agent to read-only tools for this turn.
-        if self.plan_mode {
-            if let Some(session) = self.session.lock().unwrap().as_mut() {
-                session.messages.push(luna_core::types::Message::user(format!(
-                    "{text}\n\n[Plan mode: investigate and propose a plan. Do not modify \
-                     any files or run commands that change state.]"
-                )));
-            }
-        }
+        let prompt = if self.plan_mode {
+            format!(
+                "{text}\n\n[Plan mode: investigate and propose a plan. Do not modify \
+                 any files or run commands that change state.]"
+            )
+        } else {
+            text
+        };
 
         let session = self.session.clone();
         let sender = self.event_tx.clone();
-        let prompt = if self.plan_mode { String::new() } else { text };
         self.handle.spawn(async move {
             // Take the session out for the duration of the turn so the UI thread
             // never blocks on it, then put it back.
             let taken = session.lock().unwrap().take();
             let Some(mut agent) = taken else { return };
-            let outcome = agent.run_turn(prompt).await;
+
+            // Images ride on the user message, so the provider sees them in the
+            // same request as the text.
+            if !attachments.is_empty() {
+                let mut blocks = vec![luna_core::types::ContentBlock::text(prompt.clone())];
+                blocks.extend(attachments.iter().map(|attachment| attachment.to_block()));
+                agent
+                    .messages
+                    .push(luna_core::types::Message { role: luna_core::types::Role::User, blocks });
+            }
+
+            let outcome =
+                agent.run_turn(if attachments.is_empty() { prompt } else { String::new() }).await;
             if let Err(err) = outcome {
                 let _ = sender.send(Emitted::notice("error", err.to_string()));
             }
@@ -684,6 +718,8 @@ impl App {
                     "  /thinking <l>  off|minimal|low|medium|high|xhigh|max",
                     "  /new           start a new session",
                     "  /sessions      browse saved sessions",
+                    "  /attach <path> attach an image to the next message",
+                    "  /detach        remove every attachment",
                     "  /compact       summarise the conversation",
                     "  /copy          copy the transcript",
                     "  /clear         clear the transcript",
@@ -730,6 +766,41 @@ impl App {
             "/sessions" => {
                 self.show_sessions = true;
                 self.refresh_sessions();
+            }
+            "/attach" => {
+                if argument.is_empty() {
+                    if self.attachments.is_empty() {
+                        self.lines.push(Line::Notice {
+                            level: "info".into(),
+                            text: "no images attached; /attach <path> adds one".into(),
+                        });
+                    } else {
+                        for attachment in &self.attachments {
+                            self.lines.push(Line::Notice {
+                                level: "info".into(),
+                                text: format!("attached {}", attachment.label()),
+                            });
+                        }
+                    }
+                } else {
+                    match crate::image::load(std::path::Path::new(argument)) {
+                        Ok(attachment) => {
+                            self.lines.push(Line::Notice {
+                                level: "info".into(),
+                                text: format!("attached {}", attachment.label()),
+                            });
+                            self.attachments.push(attachment);
+                        }
+                        Err(err) => self.lines.push(Line::Error(err)),
+                    }
+                }
+            }
+            "/detach" => {
+                self.attachments.clear();
+                self.lines.push(Line::Notice {
+                    level: "info".into(),
+                    text: "removed every attachment".into(),
+                });
             }
             "/compact" => {
                 // Compaction needs the session, which the worker owns during a

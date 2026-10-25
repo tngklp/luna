@@ -219,10 +219,24 @@ by the arrow keys, `Tab` to complete and `Enter` to run.
 | `/model <ref>` | Switch model, e.g. `/model local/llama3.2` |
 | `/thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `/sessions` | Browse saved sessions |
+| `/attach <path>` | Attach an image to the next message |
+| `/detach` | Remove every attachment |
 | `/compact` | Summarise the conversation |
 | `/copy` | Copy the transcript |
 | `/clear` | Clear the transcript |
 | `/quit` | Exit |
+
+### Images
+
+A PNG, JPEG, GIF or WebP can be attached to a message. In the TUI, either use
+`/attach <path>` or type the path into the message — a path that exists and has
+an image extension is attached rather than sent as text. In the GUI, drop a file
+onto the window or use the attach button.
+
+The file is checked before it is sent: the signature must match the extension and
+the size must be under 5 MB, so a corrupt image fails with a message naming the
+file rather than a provider error. Images reach the model as content blocks, so
+all three provider protocols carry them.
 
 The header shows the model and where the config came from; the status bar shows
 the run state, thinking level, context usage, tokens, cost and a per-turn

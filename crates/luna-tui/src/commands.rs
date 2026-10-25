@@ -25,6 +25,12 @@ pub const COMMANDS: &[Command] = &[
         argument: Some("<off|low|medium|high|max>"),
     },
     Command { name: "/sessions", description: "Browse saved sessions", argument: None },
+    Command {
+        name: "/attach",
+        description: "Attach an image to the next message",
+        argument: Some("<path>"),
+    },
+    Command { name: "/detach", description: "Remove every attachment", argument: None },
     Command { name: "/compact", description: "Summarise the conversation", argument: None },
     Command { name: "/copy", description: "Copy the transcript", argument: None },
     Command { name: "/clear", description: "Clear the transcript", argument: None },
