@@ -63,14 +63,12 @@ function Write-Fail([string]$Message) {
 
 function Write-Banner {
     Write-Host ''
-    Write-Host '   ██╗   ██╗███╗   ██╗███╗   ██╗ █████╗ ' -ForegroundColor Magenta
-    Write-Host '   ██║   ██║████╗  ██║████╗  ██║██╔══██╗' -ForegroundColor Magenta
-    Write-Host '   ██║   ██║██╔██╗ ██║██╔██╗ ██║███████║' -ForegroundColor Magenta
-    Write-Host '   ██║   ██║██║╚██╗██║██║╚██╗██║██╔══██║' -ForegroundColor Magenta
-    Write-Host '   ╚██████╔╝██║ ╚████║██║ ╚████║██║  ██║' -ForegroundColor Magenta
-    Write-Host '    ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═══╝╚═╝  ╚═╝' -ForegroundColor Magenta
-    Write-Host ''
-    Write-Host '   AI coding agent — terminal installer' -ForegroundColor DarkGray
+    Write-Host '   ██╗     ██╗   ██╗███╗   ██╗ █████╗ ' -ForegroundColor Magenta
+    Write-Host '   ██║     ██║   ██║████╗  ██║██╔══██╗' -ForegroundColor Magenta
+    Write-Host '   ██║     ██║   ██║██╔██╗ ██║███████║' -ForegroundColor Magenta
+    Write-Host '   ██║     ██║   ██║██║╚██╗██║██╔══██║' -ForegroundColor Magenta
+    Write-Host '   ███████╗╚██████╔╝██║ ╚████║██║  ██║' -ForegroundColor Magenta
+    Write-Host '   ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝' -ForegroundColor Magenta
     Write-Host ''
 }
 

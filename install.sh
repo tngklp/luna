@@ -42,13 +42,13 @@ die()  { fail "$1"; exit 1; }
 
 banner() {
   printf '\n'
-  printf '   %s██╗   ██╗███╗   ██╗███╗   ██╗ █████╗ %s\n' "$MAGENTA" "$RESET"
-  printf '   %s██║   ██║████╗  ██║████╗  ██║██╔══██╗%s\n' "$MAGENTA" "$RESET"
-  printf '   %s██║   ██║██╔██╗ ██║██╔██╗ ██║███████║%s\n' "$MAGENTA" "$RESET"
-  printf '   %s██║   ██║██║╚██╗██║██║╚██╗██║██╔══██║%s\n' "$MAGENTA" "$RESET"
-  printf '   %s╚██████╔╝██║ ╚████║██║ ╚████║██║  ██║%s\n' "$MAGENTA" "$RESET"
-  printf '   %s ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═══╝╚═╝  ╚═╝%s\n' "$MAGENTA" "$RESET"
-  printf '\n   %sAI coding agent — terminal installer%s\n\n' "$DIM" "$RESET"
+  printf '   %s██╗     ██╗   ██╗███╗   ██╗ █████╗ %s\n' "$MAGENTA" "$RESET"
+  printf '   %s██║     ██║   ██║████╗  ██║██╔══██╗%s\n' "$MAGENTA" "$RESET"
+  printf '   %s██║     ██║   ██║██╔██╗ ██║███████║%s\n' "$MAGENTA" "$RESET"
+  printf '   %s██║     ██║   ██║██║╚██╗██║██╔══██║%s\n' "$MAGENTA" "$RESET"
+  printf '   %s███████╗╚██████╔╝██║ ╚████║██║  ██║%s\n' "$MAGENTA" "$RESET"
+  printf '   %s╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝%s\n' "$MAGENTA" "$RESET"
+  printf '\n'
 }
 
 # ---------------------------------------------------------------------- args
