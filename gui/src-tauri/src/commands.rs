@@ -323,8 +323,18 @@ pub fn list_sessions(state: Shared) -> Vec<SessionSummaryDto> {
 }
 
 #[tauri::command]
-pub fn list_all_sessions(state: Shared) -> Vec<SessionSummaryDto> {
+pub fn list_all_sessions(state: Shared<'_>) -> Vec<SessionSummaryDto> {
     list_sessions(state)
+}
+
+/// Session paths whose contents match a query.
+#[tauri::command]
+pub fn search_sessions(state: Shared<'_>, query: String) -> Vec<String> {
+    state
+        .store
+        .search(&query)
+        .map(|list| list.into_iter().map(|summary| summary.path).collect())
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -598,6 +608,34 @@ pub fn debug_snapshot(state: Shared<'_>) -> serde_json::Value {
         "status": state.status(),
         "models": get_models(state),
     })
+}
+
+// ------------------------------------------------------------------ terminal
+
+#[tauri::command]
+pub fn terminal_start(
+    app: tauri::AppHandle,
+    terminal: tauri::State<'_, std::sync::Arc<crate::terminal::TerminalState>>,
+    state: Shared<'_>,
+) -> Result<u64, String> {
+    let cwd = state.cwd.lock().map(|cwd| cwd.clone()).map_err(error)?;
+    terminal.start(app, &cwd)
+}
+
+#[tauri::command]
+pub fn terminal_write(
+    terminal: tauri::State<'_, std::sync::Arc<crate::terminal::TerminalState>>,
+    data: String,
+) -> Result<(), String> {
+    terminal.write(&data)
+}
+
+#[tauri::command]
+pub fn terminal_stop(
+    terminal: tauri::State<'_, std::sync::Arc<crate::terminal::TerminalState>>,
+) -> Result<(), String> {
+    terminal.stop();
+    Ok(())
 }
 
 /// Keep the unused-import warning honest: `Config` and `SessionHeader` are used

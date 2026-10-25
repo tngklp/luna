@@ -36,6 +36,7 @@ const EVENT_CHANNEL = 'luna://agent-event'
 const NOTICE_CHANNEL = 'luna://notice'
 const UI_REQUEST_CHANNEL = 'luna://ui-request'
 const UPDATE_CHANNEL = 'luna://update'
+const TERMINAL_CHANNEL = 'luna://terminal'
 
 /** Subscribe to a Tauri channel, returning piui's unsubscribe shape. */
 function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
@@ -81,6 +82,8 @@ export interface LunaApi {
   setApprovalConfig(config: ApprovalConfig): Promise<void>
   listSessions(): Promise<SessionSummaryDto[]>
   listAllSessions(): Promise<SessionSummaryDto[]>
+  /** Session paths whose contents match a query. */
+  searchSessions(query: string): Promise<string[]>
   switchSession(path: string): Promise<void>
   renameSession(name: string): Promise<void>
   forkSession(): Promise<void>
@@ -101,6 +104,14 @@ export interface LunaApi {
   checkForUpdates(): Promise<UpdateStateDto>
   downloadUpdate(): Promise<UpdateStateDto>
   installUpdate(): Promise<void>
+  /** Start the integrated shell. */
+  terminalStart(): Promise<number>
+  /** Write to the integrated shell. */
+  terminalWrite(data: string): Promise<void>
+  /** Stop the integrated shell. */
+  terminalStop(): Promise<void>
+  /** Subscribe to shell output. Returns an unsubscribe function. */
+  onTerminalData(listener: (data: string) => void): () => void
 }
 
 export const luna: LunaApi = {
@@ -134,6 +145,7 @@ export const luna: LunaApi = {
 
   listSessions: () => invoke('list_sessions'),
   listAllSessions: () => invoke('list_all_sessions'),
+  searchSessions: (query) => invoke('search_sessions', { query }),
   switchSession: (path) => invoke('switch_session', { path }),
   renameSession: (name) => invoke('rename_session', { name }),
   forkSession: () => invoke('fork_session'),
@@ -155,7 +167,12 @@ export const luna: LunaApi = {
   getUpdateState: () => invoke('get_update_state'),
   checkForUpdates: () => invoke('check_for_updates'),
   downloadUpdate: () => invoke('download_update'),
-  installUpdate: () => invoke('install_update')
+  installUpdate: () => invoke('install_update'),
+
+  terminalStart: () => invoke('terminal_start'),
+  terminalWrite: (data) => invoke('terminal_write', { data }),
+  terminalStop: () => invoke('terminal_stop'),
+  onTerminalData: (listener) => subscribe<string>(TERMINAL_CHANNEL, listener)
 }
 
 declare global {

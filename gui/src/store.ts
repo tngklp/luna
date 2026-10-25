@@ -164,6 +164,16 @@ interface LunaState {
   settingsOpen: boolean
   /** Which settings section is showing. */
   settingsTab: SettingsTab
+  /** Whether the command palette is open. */
+  quickOpen: boolean
+  /** Whether the shortcut sheet is open. */
+  shortcutsOpen: boolean
+  /** Whether the integrated terminal is showing. */
+  terminalOpen: boolean
+  /** Whether the sidebar is showing. */
+  sidebarOpen: boolean
+  /** Session paths matching a content search, when one is running. */
+  contentMatches: string[]
 
   initialize: () => Promise<void>
   refresh: () => Promise<void>
@@ -189,6 +199,14 @@ interface LunaState {
   openSettings: () => void
   closeSettings: () => void
   setSettingsTab: (tab: SettingsTab) => void
+  openQuickOpen: () => void
+  closeQuickOpen: () => void
+  openShortcuts: () => void
+  closeShortcuts: () => void
+  toggleTerminal: () => void
+  toggleSidebar: () => void
+  /** Search session contents, not just titles. */
+  searchContent: (query: string) => Promise<void>
   /** Open a changed file in the operating system's editor. */
   openFile: (path: string) => void
   setSessionQuery: (query: string) => void
@@ -280,6 +298,11 @@ export const useLuna = create<LunaState>()((set, get) => ({
   mainTab: 'chat',
   settingsOpen: false,
   settingsTab: 'general',
+  quickOpen: false,
+  shortcutsOpen: false,
+  terminalOpen: false,
+  sidebarOpen: true,
+  contentMatches: [],
 
   initialize: async () => {
     if (get().initialized) return
@@ -661,6 +684,27 @@ export const useLuna = create<LunaState>()((set, get) => ({
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
   setSettingsTab: (tab) => set({ settingsTab: tab }),
+  openQuickOpen: () => set({ quickOpen: true }),
+  closeQuickOpen: () => set({ quickOpen: false }),
+  openShortcuts: () => set({ shortcutsOpen: true }),
+  closeShortcuts: () => set({ shortcutsOpen: false }),
+  toggleTerminal: () => set((state) => ({ terminalOpen: !state.terminalOpen })),
+  toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+
+  searchContent: async (query) => {
+    const trimmed = query.trim()
+    if (trimmed.length === 0) {
+      set({ contentMatches: [] })
+      return
+    }
+    try {
+      const paths = await window.luna.searchSessions(trimmed)
+      set({ contentMatches: paths })
+    } catch {
+      // A failed search is not worth an error banner; the title filter still works.
+      set({ contentMatches: [] })
+    }
+  },
   openFile: (path) => {
     // Luna has no editor pane, so a changed file opens in whatever the user has
     // registered for it rather than in a tab that does not exist.

@@ -335,6 +335,7 @@ export function createMockApi(): LunaApi {
 
     listSessions: async () => sessions,
     listAllSessions: async () => sessions,
+    searchSessions: async () => [],
     switchSession: async () => undefined,
     renameSession: async () => undefined,
     forkSession: async () => undefined,
@@ -361,6 +362,11 @@ export function createMockApi(): LunaApi {
     getUpdateState: async () => idleUpdate,
     checkForUpdates: async () => idleUpdate,
     downloadUpdate: async () => idleUpdate,
-    installUpdate: async () => undefined
+    installUpdate: async () => undefined,
+
+    terminalStart: async () => 1,
+    terminalWrite: async () => undefined,
+    terminalStop: async () => undefined,
+    onTerminalData: () => () => undefined
   }
 }

@@ -7,6 +7,7 @@
 mod commands;
 mod dto;
 mod state;
+mod terminal;
 
 use std::sync::Arc;
 
@@ -32,6 +33,7 @@ pub fn run() {
             let handle = app.handle().clone();
             let state = state::AppState::new(handle)?;
             app.manage(state);
+            app.manage(terminal::TerminalState::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -57,6 +59,7 @@ pub fn run() {
             commands::set_approval_config,
             commands::list_sessions,
             commands::list_all_sessions,
+            commands::search_sessions,
             commands::switch_session,
             commands::rename_session,
             commands::fork_session,
@@ -76,6 +79,10 @@ pub fn run() {
             commands::download_update,
             commands::install_update,
             commands::debug_snapshot,
+            commands::terminal_start,
+            commands::terminal_write,
+            commands::terminal_stop,
+            terminal::terminal_running,
         ])
         .run(tauri::generate_context!())
         .expect("Luna could not start");
