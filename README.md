@@ -238,10 +238,27 @@ npm install
 npm run dev                     # the UI in a browser, backed by a mock
 npm run tauri:dev               # the real app
 npm run typecheck
+npm run check                   # type-check the Rust backend
 ```
 
 `npm run dev` serves the renderer with a mock core, which is how the chat surface
 is developed without rebuilding Rust.
+
+### The TUI sidecar
+
+The desktop installer ships the `luna` binary as a Tauri sidecar, so
+`gui/src-tauri/binaries/luna-<target-triple>` must exist before **any** Cargo
+command runs in `gui/src-tauri` — Tauri's build script validates `externalBin`
+paths even for `cargo check`.
+
+```sh
+cargo build --release -p luna-tui   # build the TUI first
+cd gui && npm run sidecar           # copy it into place
+```
+
+`npm run sidecar:optional` writes a placeholder instead of failing, which is what
+CI uses for `cargo check`. Release builds use the strict form so a placeholder can
+never be bundled.
 
 ### Layout
 

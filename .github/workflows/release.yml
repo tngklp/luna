@@ -32,6 +32,8 @@ jobs:
             cross: true
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
           - os: macos-latest
             target: x86_64-apple-darwin
           - os: macos-latest
@@ -87,19 +89,29 @@ jobs:
           if-no-files-found: error
 
   # The desktop app: NSIS + MSI on Windows, deb + AppImage on Linux, dmg on macOS.
+  #
+  # macOS builds one dmg per architecture rather than a universal binary: Tauri
+  # resolves a sidecar as `<name>-<target>`, and `luna-universal-apple-darwin`
+  # cannot exist, so a universal build would fail to find the TUI.
   gui:
-    name: GUI (${{ matrix.os }})
+    name: GUI (${{ matrix.os }} ${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
+            target: x86_64-pc-windows-msvc
             args: ''
           - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
             args: ''
           - os: macos-latest
-            args: '--target universal-apple-darwin'
+            target: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            args: '--target x86_64-apple-darwin'
     steps:
       - uses: actions/checkout@v4
 
@@ -111,7 +123,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -134,18 +146,14 @@ jobs:
           node ../scripts/sync-material-icons.mjs
           node ../scripts/sync-catppuccin-icons.mjs
 
-      # The installer ships the TUI as a sidecar, so it has to exist first.
+      # The installer ships the TUI as a sidecar, so it has to exist first, and
+      # it must be built for the same target the bundle is for.
       - name: Build the TUI sidecar
         shell: bash
         run: |
-          if [ "${{ matrix.os }}" = "macos-latest" ]; then
-            cargo build --release -p luna-tui --target aarch64-apple-darwin
-            cargo build --release -p luna-tui --target x86_64-apple-darwin
-            node scripts/stage-tui.mjs --triple aarch64-apple-darwin
-          else
-            cargo build --release -p luna-tui
-            node scripts/stage-tui.mjs
-          fi
+          set -euo pipefail
+          cargo build --release -p luna-tui --target ${{ matrix.target }}
+          node scripts/stage-tui.mjs --triple ${{ matrix.target }}
 
       - uses: tauri-apps/tauri-action@v0
         env:

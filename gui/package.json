@@ -11,10 +11,16 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "icons": "node ../scripts/sync-material-icons.mjs && node ../scripts/sync-catppuccin-icons.mjs",
+    "sidecar": "node ../scripts/stage-tui.mjs",
+    "sidecar:optional": "node ../scripts/stage-tui.mjs --optional",
     "predev": "npm run icons",
     "prebuild": "npm run icons",
+    "pretypecheck": "npm run icons",
+    "check": "npm run sidecar:optional && cd src-tauri && cargo check --all-targets",
     "tauri": "tauri",
+    "pretauri:dev": "npm run sidecar:optional",
     "tauri:dev": "tauri dev",
+    "pretauri:build": "npm run sidecar",
     "tauri:build": "tauri build"
   },
   "dependencies": {

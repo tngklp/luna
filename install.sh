@@ -205,7 +205,16 @@ install_luna() {
   trap 'rm -rf "$temp"' EXIT INT TERM
 
   step "Downloading $archive"
-  download "$base/$archive" "$temp/$archive" || die "Download failed: $base/$archive"
+  if ! download "$base/$archive" "$temp/$archive" 2>/dev/null; then
+    case "$triple" in
+      aarch64-unknown-linux-gnu)
+        die "No ARM64 Linux build is published for $tag. Build from source: cargo build --release -p luna-tui"
+        ;;
+      *)
+        die "Could not download $archive from $base — the release may not include this platform yet."
+        ;;
+    esac
+  fi
   size=$(wc -c < "$temp/$archive" | tr -d ' ')
   ok "Downloaded $((size / 1024 / 1024)) MB"
 

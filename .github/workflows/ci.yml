@@ -106,6 +106,13 @@ jobs:
         working-directory: gui
         run: npx vite build
 
+      # Tauri's build script validates `externalBin` paths even for `cargo check`,
+      # so the sidecar has to exist first. A placeholder is enough here: this job
+      # only type-checks the backend and never bundles it.
+      - name: Stage the TUI sidecar
+        working-directory: gui
+        run: npm run sidecar:optional
+
       - name: Check the Rust backend
         working-directory: gui/src-tauri
         run: cargo check --all-targets

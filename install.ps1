@@ -169,7 +169,16 @@ function Install-Luna {
     try {
         Write-Step "Downloading $archive"
         $archivePath = Join-Path $temp $archive
-        Invoke-WebRequest -Uri "$base/$archive" -OutFile $archivePath -UseBasicParsing
+        try {
+            Invoke-WebRequest -Uri "$base/$archive" -OutFile $archivePath -UseBasicParsing
+        } catch {
+            # An architecture can be missing from a release. Say so plainly
+            # instead of surfacing a raw 404.
+            if ($triple -eq 'aarch64-pc-windows-msvc') {
+                throw "No ARM64 Windows build is published for $tag. Use the x64 build under emulation, or build from source: cargo build --release -p luna-tui"
+            }
+            throw "Could not download $archive from $base — the release may not include this platform yet."
+        }
         Write-Ok "Downloaded $([math]::Round((Get-Item $archivePath).Length / 1MB, 2)) MB"
 
         # Verify the checksum when the release publishes one.
