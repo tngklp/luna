@@ -50,7 +50,7 @@ pub struct ModelDto {
     pub cost: CostDto,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CostDto {
     pub input: f64,
@@ -392,23 +392,26 @@ pub struct UiResponseDto {
     pub answer: String,
 }
 
+/// Approval policy in the shape the settings dialog edits.
+///
+/// `defaultPolicy` covers anything unlisted; `tools` holds one entry per class
+/// (`read`, `write`, `bash`, `network`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalConfigDto {
-    pub read: String,
-    pub write: String,
-    pub bash: String,
-    pub network: String,
+    pub default_policy: String,
+    pub tools: std::collections::BTreeMap<String, String>,
 }
 
 impl From<CoreApprovals> for ApprovalConfigDto {
     fn from(config: CoreApprovals) -> Self {
-        ApprovalConfigDto {
-            read: config.read.as_str().to_string(),
-            write: config.write.as_str().to_string(),
-            bash: config.bash.as_str().to_string(),
-            network: config.network.as_str().to_string(),
-        }
+        let tools = std::collections::BTreeMap::from([
+            ("read".to_string(), config.read.as_str().to_string()),
+            ("write".to_string(), config.write.as_str().to_string()),
+            ("bash".to_string(), config.bash.as_str().to_string()),
+            ("network".to_string(), config.network.as_str().to_string()),
+        ]);
+        ApprovalConfigDto { default_policy: "ask".to_string(), tools }
     }
 }
 
@@ -422,11 +425,15 @@ fn parse_action(value: &str) -> ApprovalAction {
 
 impl From<ApprovalConfigDto> for CoreApprovals {
     fn from(config: ApprovalConfigDto) -> Self {
+        let get = |key: &str, fallback: ApprovalAction| {
+            config.tools.get(key).map(|value| parse_action(value)).unwrap_or(fallback)
+        };
+        let default = parse_action(&config.default_policy);
         CoreApprovals {
-            read: parse_action(&config.read),
-            write: parse_action(&config.write),
-            bash: parse_action(&config.bash),
-            network: parse_action(&config.network),
+            read: get("read", default),
+            write: get("write", default),
+            bash: get("bash", default),
+            network: get("network", default),
         }
     }
 }
@@ -455,14 +462,18 @@ pub struct FsFileDto {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelDefDto {
     pub id: String,
     pub name: String,
+    pub reasoning: bool,
+    #[serde(default)]
+    pub input: Vec<String>,
     pub context_window: u32,
     pub max_tokens: u32,
-    pub reasoning: bool,
+    #[serde(default)]
+    pub cost: CostDto,
 }
 
 impl From<ModelInfo> for ModelDefDto {
@@ -470,9 +481,16 @@ impl From<ModelInfo> for ModelDefDto {
         ModelDefDto {
             id: model.id,
             name: model.name,
+            reasoning: model.reasoning,
+            input: model.input,
             context_window: model.context_window,
             max_tokens: model.max_tokens,
-            reasoning: model.reasoning,
+            cost: CostDto {
+                input: model.cost.input,
+                output: model.cost.output,
+                cache_read: model.cost.cache_read,
+                cache_write: model.cost.cache_write,
+            },
         }
     }
 }
@@ -480,23 +498,39 @@ impl From<ModelInfo> for ModelDefDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderConfigDto {
+    pub id: String,
+    #[serde(default)]
+    pub preset: Option<String>,
     pub kind: String,
+    #[serde(default)]
     pub base_url: Option<String>,
+    #[serde(default)]
     pub api_key_env: Option<String>,
-    pub models: Vec<String>,
+    #[serde(default = "yes")]
+    pub discover_models: bool,
+    #[serde(default)]
+    pub models: Vec<ModelDefDto>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelsConfigDto {
-    pub providers: std::collections::BTreeMap<String, ProviderConfigDto>,
+    /// Absolute path of the file the catalogue is read from.
+    pub path: String,
     pub default_model: String,
+    pub providers: Vec<ProviderConfigDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelsUpdateResultDto {
+    pub config: ModelsConfigDto,
     pub models: Vec<ModelDto>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -565,15 +599,32 @@ mod tests {
     #[test]
     fn approval_config_round_trips() {
         let dto = ApprovalConfigDto {
-            read: "allow".into(),
-            write: "ask".into(),
-            bash: "deny".into(),
-            network: "allow".into(),
+            default_policy: "ask".into(),
+            tools: std::collections::BTreeMap::from([
+                ("read".to_string(), "allow".to_string()),
+                ("write".to_string(), "ask".to_string()),
+                ("bash".to_string(), "deny".to_string()),
+                ("network".to_string(), "allow".to_string()),
+            ]),
         };
         let core: CoreApprovals = dto.clone().into();
         assert_eq!(core.bash, ApprovalAction::Deny);
+        assert_eq!(core.read, ApprovalAction::Allow);
+
         let back: ApprovalConfigDto = core.into();
-        assert_eq!(back.write, "ask");
+        assert_eq!(back.tools["write"], "ask");
+        assert_eq!(back.tools["bash"], "deny");
+    }
+
+    #[test]
+    fn an_unlisted_class_falls_back_to_the_default_policy() {
+        let dto = ApprovalConfigDto {
+            default_policy: "deny".into(),
+            tools: std::collections::BTreeMap::new(),
+        };
+        let core: CoreApprovals = dto.into();
+        assert_eq!(core.read, ApprovalAction::Deny);
+        assert_eq!(core.bash, ApprovalAction::Deny);
     }
 
     #[test]

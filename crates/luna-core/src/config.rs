@@ -312,99 +312,45 @@ impl Default for Config {
 
 /// Where Luna keeps its state.
 ///
-/// Two roots, deliberately separate:
-///
-/// * **config** — `./.luna/config.toml` when the working directory has one, else
-///   the per-user config directory. A project-local file lets a repo pin its own
-///   model and approvals without touching the user's global settings.
-/// * **data** — always per-user. Sessions and the index are not project files.
+/// One directory, `~/.luna`, holds everything: the config, the session
+/// transcripts and the index. Keeping it in one obvious place means a user can
+/// back it up, inspect it, or delete it without hunting through platform
+/// directories.
 #[derive(Debug, Clone)]
 pub struct Paths {
-    pub config_dir: PathBuf,
-    pub data_dir: PathBuf,
-    /// The working directory a project-local config would live in.
-    pub project_dir: PathBuf,
+    /// `~/.luna`
+    pub root: PathBuf,
 }
 
 impl Paths {
     pub fn resolve() -> Paths {
-        Paths::resolve_in(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        Paths::resolve_in(home_dir())
     }
 
-    /// Resolve for a specific working directory. Used by tests and by the GUI,
-    /// which can change workspace without restarting.
-    pub fn resolve_in(project_dir: impl Into<PathBuf>) -> Paths {
-        use directories::ProjectDirs;
-        // Luna keeps everything under one root so the installers and the app
-        // agree on where to look.
-        let base = ProjectDirs::from("", "", "luna");
-        let (config_dir, data_dir) = match &base {
-            Some(dirs) => (dirs.config_dir().to_path_buf(), dirs.data_dir().to_path_buf()),
-            None => {
-                let home = std::env::var_os("HOME")
-                    .or_else(|| std::env::var_os("USERPROFILE"))
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from("."));
-                (home.join(".config").join("luna"), home.join(".local/share/luna"))
-            }
-        };
-        // `ProjectDirs` already appends the application name, and on Windows it
-        // also appends `\config` to the roaming directory. Both roots are used
-        // exactly as given.
-        Paths { config_dir, data_dir, project_dir: project_dir.into() }
+    /// Resolve against a specific home directory. Used by tests.
+    pub fn resolve_in(home: impl Into<PathBuf>) -> Paths {
+        Paths { root: home.into().join(".luna") }
     }
 
-    /// The project-local config file, `./.luna/config.toml`.
-    pub fn project_config_file(&self) -> PathBuf {
-        self.project_dir.join(".luna").join("config.toml")
-    }
-
-    /// The per-user config file.
-    pub fn global_config_file(&self) -> PathBuf {
-        self.config_dir.join("config.toml")
-    }
-
-    /// The config file that will actually be read.
-    ///
-    /// `.luna/config.toml` in the working directory is the primary location: it
-    /// is where a first run writes, and where a project pins its own settings.
-    /// The per-user file is a fallback for running outside a project.
+    /// The config file, `~/.luna/config.toml`.
     pub fn config_file(&self) -> PathBuf {
-        let project = self.project_config_file();
-        if project.exists() {
-            return project;
-        }
-        let global = self.global_config_file();
-        if global.exists() {
-            return global;
-        }
-        project
-    }
-
-    /// The file a *new* config is written to: always `.luna/config.toml`.
-    pub fn new_config_file(&self) -> PathBuf {
-        self.project_config_file()
-    }
-
-    /// Whether a project-local config is in use.
-    pub fn uses_project_config(&self) -> bool {
-        self.project_config_file().exists()
+        self.root.join("config.toml")
     }
 
     pub fn sessions_dir(&self) -> PathBuf {
-        self.data_dir.join("sessions")
+        self.root.join("sessions")
     }
 
     pub fn db_file(&self) -> PathBuf {
-        self.data_dir.join("luna.db")
+        self.root.join("luna.db")
     }
 
     pub fn log_file(&self) -> PathBuf {
-        self.data_dir.join("luna.log")
+        self.root.join("luna.log")
     }
 
     pub fn ensure(&self) -> Result<()> {
-        for dir in [&self.config_dir, &self.data_dir, &self.sessions_dir()] {
+        for dir in [&self.root, &self.sessions_dir()] {
             std::fs::create_dir_all(dir)
                 .map_err(|source| LunaError::Io { path: dir.clone(), source })?;
         }
@@ -412,32 +358,37 @@ impl Paths {
     }
 }
 
+/// The user's home directory.
+///
+/// `HOME` first, then `USERPROFILE` for Windows, then the platform API as a
+/// last resort.
+pub fn home_dir() -> PathBuf {
+    if let Some(home) = std::env::var_os("HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(home);
+    }
+    if let Some(home) = std::env::var_os("USERPROFILE").filter(|value| !value.is_empty()) {
+        return PathBuf::from(home);
+    }
+    directories::BaseDirs::new()
+        .map(|dirs| dirs.home_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 impl Config {
     /// Load the config, writing a default one when no file exists.
     ///
-    /// A project-local `.luna/config.toml` wins over the per-user file. When
-    /// neither exists, the default is written to the project so the settings a
-    /// run actually used are visible in the repo.
+    /// The file lives at `~/.luna/config.toml`. A first run creates it, so the
+    /// settings a session used are always inspectable.
     pub fn load(paths: &Paths) -> Result<Config> {
         paths.ensure()?;
 
-        // `.luna/config.toml` is the primary location, so make sure it exists
-        // before reading. A project that has never run Luna gets one written on
-        // first launch, which is what makes the settings a run used visible in
-        // the repository.
-        let project = paths.project_config_file();
-        if !project.exists() {
-            let seed = if paths.global_config_file().exists() {
-                // Start from the user's settings rather than bare defaults, so
-                // an existing setup carries into the project.
-                Config::load_file(&paths.global_config_file()).unwrap_or_default()
-            } else {
-                Config::default()
-            };
-            seed.save_new(paths)?;
+        let path = paths.config_file();
+        if !path.exists() {
+            let config = Config::default();
+            config.save(paths)?;
+            return Ok(config);
         }
 
-        let path = paths.config_file();
         let mut config = Config::load_file(&path)?;
         config.normalize();
         Ok(config)
@@ -480,25 +431,7 @@ impl Config {
 
     pub fn save(&self, paths: &Paths) -> Result<()> {
         paths.ensure()?;
-        // Write back to whichever file was read, so a project-local config stays
-        // project-local instead of silently forking into the user's directory.
         let path = paths.config_file();
-        let text = toml::to_string_pretty(self)
-            .map_err(|err| LunaError::Config(format!("could not serialize config: {err}")))?;
-        write_atomic(&path, text.as_bytes())
-    }
-
-    /// Write the config to the project-local path, creating `.luna/`.
-    pub fn save_project(&self, paths: &Paths) -> Result<()> {
-        let path = paths.project_config_file();
-        let text = toml::to_string_pretty(self)
-            .map_err(|err| LunaError::Config(format!("could not serialize config: {err}")))?;
-        write_atomic(&path, text.as_bytes())
-    }
-
-    /// Write a fresh config to `.luna/config.toml`.
-    pub fn save_new(&self, paths: &Paths) -> Result<()> {
-        let path = paths.new_config_file();
         let text = toml::to_string_pretty(self)
             .map_err(|err| LunaError::Config(format!("could not serialize config: {err}")))?;
         write_atomic(&path, text.as_bytes())
@@ -536,94 +469,74 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// The smallest valid config: `default_model` is the only required field.
-    const MINIMAL: &str = "[general]\ndefault_model = \"anthropic/claude-sonnet-4-5\"\n";
-
-    fn temp_project(name: &str) -> PathBuf {
+    fn temp_home(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("luna-cfg-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
     #[test]
-    fn a_project_config_wins_over_the_global_one() {
-        let dir = temp_project("project");
-        let paths = Paths::resolve_in(&dir);
-
-        // With neither file present, the project path is the one that will be
-        // created, so a first run stays inside the working directory.
-        if !paths.global_config_file().exists() {
-            assert_eq!(paths.config_file(), paths.project_config_file());
-        }
-
-        std::fs::create_dir_all(dir.join(".luna")).unwrap();
-        std::fs::write(dir.join(".luna").join("config.toml"), MINIMAL).unwrap();
-
-        // A project config always wins, whatever the user has globally.
-        assert!(paths.uses_project_config());
-        assert_eq!(paths.config_file(), paths.project_config_file());
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn the_global_config_is_used_when_no_project_config_exists() {
-        let dir = temp_project("global");
-        let paths = Paths::resolve_in(&dir);
-        // Simulate a user who has a global config but no project one.
-        std::fs::create_dir_all(&paths.config_dir).unwrap();
-        std::fs::write(paths.global_config_file(), MINIMAL).unwrap();
-
-        assert!(!paths.uses_project_config());
-        assert_eq!(paths.config_file(), paths.global_config_file());
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn the_project_config_lives_under_dot_luna() {
-        let paths = Paths::resolve_in("/work/repo");
-        assert!(paths.project_config_file().ends_with(".luna/config.toml"));
+    fn everything_lives_under_dot_luna_in_the_home_directory() {
+        let paths = Paths::resolve_in("/home/dev");
+        assert_eq!(paths.root, PathBuf::from("/home/dev/.luna"));
+        assert_eq!(paths.config_file(), PathBuf::from("/home/dev/.luna/config.toml"));
+        assert_eq!(paths.sessions_dir(), PathBuf::from("/home/dev/.luna/sessions"));
+        assert_eq!(paths.db_file(), PathBuf::from("/home/dev/.luna/luna.db"));
     }
 
     #[test]
     fn loading_writes_a_default_config_when_none_exists() {
-        let dir = temp_project("default");
-        let paths = Paths::resolve_in(&dir);
+        let home = temp_home("default");
+        let paths = Paths::resolve_in(&home);
         let config = Config::load(&paths).unwrap();
         assert_eq!(config.general.default_model, "anthropic/claude-sonnet-4-5");
         assert!(paths.config_file().exists());
-        std::fs::remove_dir_all(&dir).ok();
+        assert!(paths.config_file().ends_with(".luna/config.toml"));
+        std::fs::remove_dir_all(&home).ok();
     }
 
     #[test]
-    fn a_project_config_is_read_instead_of_the_global_one() {
-        let dir = temp_project("read");
-        let paths = Paths::resolve_in(&dir);
-        std::fs::create_dir_all(dir.join(".luna")).unwrap();
+    fn a_fresh_working_directory_gets_nothing() {
+        // The config belongs to the user, not the project, so launching in a new
+        // directory must not litter it.
+        let home = temp_home("fresh-home");
+        let work = temp_home("fresh-work");
+        let paths = Paths::resolve_in(&home);
+        Config::load(&paths).unwrap();
+
+        let entries: Vec<_> = std::fs::read_dir(&work).unwrap().flatten().collect();
+        assert!(entries.is_empty(), "the working directory should stay untouched");
+        std::fs::remove_dir_all(&home).ok();
+        std::fs::remove_dir_all(&work).ok();
+    }
+
+    #[test]
+    fn an_existing_config_is_read() {
+        let home = temp_home("read");
+        let paths = Paths::resolve_in(&home);
+        std::fs::create_dir_all(&paths.root).unwrap();
         std::fs::write(
-            dir.join(".luna").join("config.toml"),
+            paths.config_file(),
             "[general]\ndefault_model = \"groq/llama-3.3-70b-versatile\"\n",
         )
         .unwrap();
 
         let config = Config::load(&paths).unwrap();
         assert_eq!(config.general.default_model, "groq/llama-3.3-70b-versatile");
-        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&home).ok();
     }
 
     #[test]
-    fn saving_keeps_a_project_config_project_local() {
-        let dir = temp_project("save");
-        let paths = Paths::resolve_in(&dir);
-        std::fs::create_dir_all(dir.join(".luna")).unwrap();
-        std::fs::write(dir.join(".luna").join("config.toml"), MINIMAL).unwrap();
-
+    fn saving_writes_back_to_the_same_file() {
+        let home = temp_home("save");
+        let paths = Paths::resolve_in(&home);
         let mut config = Config::load(&paths).unwrap();
         config.general.max_steps = 7;
         config.save(&paths).unwrap();
 
-        let text = std::fs::read_to_string(paths.project_config_file()).unwrap();
+        let text = std::fs::read_to_string(paths.config_file()).unwrap();
         assert!(text.contains("max_steps = 7"));
-        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&home).ok();
     }
 
     #[test]

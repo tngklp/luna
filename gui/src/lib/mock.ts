@@ -120,27 +120,34 @@ const sessions: SessionSummaryDto[] = [
 ]
 
 const modelsConfig: ModelsConfigDto = {
-  path: '/home/dev/.config/luna/models.json',
+  path: '/home/dev/.luna/config.toml',
+  defaultModel: 'anthropic/claude-sonnet-4-5',
   providers: [
     {
       id: 'anthropic',
+      preset: 'anthropic',
+      kind: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
-      api: 'anthropic',
-      apiKey: 'ANTHROPIC_API_KEY',
+      apiKeyEnv: 'ANTHROPIC_API_KEY',
+      discoverModels: true,
       models: [modelDefs[0]]
     },
     {
       id: 'openai',
+      preset: 'openai',
+      kind: 'openai',
       baseUrl: 'https://api.openai.com/v1',
-      api: 'openai',
-      apiKey: 'OPENAI_API_KEY',
+      apiKeyEnv: 'OPENAI_API_KEY',
+      discoverModels: true,
       models: [modelDefs[1]]
     },
     {
-      id: 'local',
+      id: 'ollama',
+      preset: 'ollama',
+      kind: 'openai',
       baseUrl: 'http://localhost:11434/v1',
-      api: 'openai',
-      apiKey: '',
+      apiKeyEnv: null,
+      discoverModels: true,
       models: [modelDefs[2]]
     }
   ]

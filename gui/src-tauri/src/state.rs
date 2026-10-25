@@ -95,7 +95,7 @@ impl AppState {
         paths.ensure()?;
         let config = Config::load_or_default(&paths);
         let providers = Arc::new(ProviderRegistry::new(&config));
-        let store = SessionStore::open(&paths.data_dir)?;
+        let store = SessionStore::open(&paths.root)?;
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
         let sink: SinkRef = Arc::new(TauriSink { app: app.clone() });
@@ -119,7 +119,10 @@ impl AppState {
             changes_revision: Mutex::new(0),
         });
 
-        state.start_session()?;
+        // No session is created here: a draft exists in memory, and the
+        // transcript is only written when the first prompt is sent. That keeps
+        // "New session" from littering the session list with empty files.
+        state.start_draft()?;
         Ok(state)
     }
 
@@ -131,8 +134,11 @@ impl AppState {
         self.streaming.store(value, Ordering::Relaxed);
     }
 
-    /// Build a fresh session and agent for the current working directory.
-    pub fn start_session(&self) -> anyhow::Result<()> {
+    /// Build an in-memory session with no transcript on disk yet.
+    ///
+    /// This is what "New session" produces: the chat window is ready, but
+    /// nothing is saved until the user actually sends something.
+    pub fn start_draft(&self) -> anyhow::Result<()> {
         let cwd = self.cwd.lock().map(|cwd| cwd.clone()).unwrap_or_else(|_| PathBuf::from("."));
         let config = self.config.lock().map(|config| config.clone()).unwrap_or_default();
         let providers = self
@@ -142,8 +148,6 @@ impl AppState {
             .unwrap_or_else(|_| Arc::new(ProviderRegistry::new(&config)));
 
         let id = uuid::Uuid::new_v4().to_string();
-        let header = SessionHeader::new(&id, cwd.display().to_string(), &config.general.default_model);
-        let transcript = self.store.create(&header)?;
         let system = build_system(&config, &cwd, None);
 
         let deps = Arc::new(
@@ -159,10 +163,44 @@ impl AppState {
         if let Ok(mut slot) = self.session.lock() {
             *slot = Some(session);
         }
+        // No transcript yet; `ensure_transcript` creates it on the first prompt.
+        if let Ok(mut slot) = self.transcript.lock() {
+            *slot = None;
+        }
+        Ok(())
+    }
+
+    /// Create the transcript for the current session if it does not exist yet.
+    ///
+    /// Called before the first turn, so an abandoned draft never reaches disk.
+    pub fn ensure_transcript(&self) -> anyhow::Result<()> {
+        if self.transcript.lock().map(|slot| slot.is_some()).unwrap_or(false) {
+            return Ok(());
+        }
+
+        let cwd = self.cwd.lock().map(|cwd| cwd.clone()).unwrap_or_else(|_| PathBuf::from("."));
+        let (id, model) = self
+            .session
+            .lock()
+            .ok()
+            .and_then(|slot| {
+                slot.as_ref()
+                    .map(|session| (session.agent.agent_id.clone(), session.model.clone()))
+            })
+            .unwrap_or_else(|| (uuid::Uuid::new_v4().to_string(), String::new()));
+
+        let header = SessionHeader::new(&id, cwd.display().to_string(), model);
+        let transcript = self.store.create(&header)?;
         if let Ok(mut slot) = self.transcript.lock() {
             *slot = Some(transcript);
         }
         Ok(())
+    }
+
+    /// Build a fresh session and agent for the current working directory.
+    pub fn start_session(&self) -> anyhow::Result<()> {
+        self.start_draft()?;
+        self.ensure_transcript()
     }
 
     /// The current session's messages, as the renderer wants them.

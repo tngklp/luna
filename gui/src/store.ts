@@ -32,6 +32,7 @@ import { loadUiPreferences, saveUiPreferences, type UiPreferences } from './lib/
  */
 
 export type MainTab = 'chat' | 'changes'
+export type SettingsTab = 'general' | 'models' | 'customization' | 'tools'
 export type SessionFilter = 'all' | 'running' | 'starred'
 
 interface StreamingState {
@@ -161,6 +162,8 @@ interface LunaState {
   mainTab: MainTab
   /** Whether the settings dialog is open. */
   settingsOpen: boolean
+  /** Which settings section is showing. */
+  settingsTab: SettingsTab
 
   initialize: () => Promise<void>
   refresh: () => Promise<void>
@@ -185,6 +188,7 @@ interface LunaState {
   setPrefs: (patch: Partial<UiPreferences>) => void
   openSettings: () => void
   closeSettings: () => void
+  setSettingsTab: (tab: SettingsTab) => void
   /** Open a changed file in the operating system's editor. */
   openFile: (path: string) => void
   setSessionQuery: (query: string) => void
@@ -275,6 +279,7 @@ export const useLuna = create<LunaState>()((set, get) => ({
   prefs: loadUiPreferences(),
   mainTab: 'chat',
   settingsOpen: false,
+  settingsTab: 'general',
 
   initialize: async () => {
     if (get().initialized) return
@@ -655,6 +660,7 @@ export const useLuna = create<LunaState>()((set, get) => ({
 
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
+  setSettingsTab: (tab) => set({ settingsTab: tab }),
   openFile: (path) => {
     // Luna has no editor pane, so a changed file opens in whatever the user has
     // registered for it rather than in a tab that does not exist.

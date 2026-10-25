@@ -119,8 +119,6 @@ pub struct App {
     pub context_percent: f32,
     /// Where the config was read from, shown in the header.
     pub config_path: String,
-    /// Whether that config is project-local.
-    pub project_config: bool,
 
     providers: Arc<ProviderRegistry>,
     store: SessionStore,
@@ -145,7 +143,6 @@ impl App {
         _sink: SinkRef,
         handle: Handle,
         config_path: String,
-        project_config: bool,
     ) -> Result<App> {
         let (event_tx, events) = unbounded_channel();
         let (approval_tx, approvals) = unbounded_channel();
@@ -182,7 +179,6 @@ impl App {
             cost: 0.0,
             context_percent: 0.0,
             config_path,
-            project_config,
             config,
             providers,
             store,

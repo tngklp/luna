@@ -17,3 +17,6 @@ gui/src/lib/catppuccin-icons.json
 gui/public/material-icons
 gui/public/catppuccin-icons
 gui/src-tauri/binaries
+
+# Luna's own state directory, when a test run creates one locally
+.luna/

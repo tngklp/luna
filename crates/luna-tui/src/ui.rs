@@ -90,11 +90,6 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Span::styled(app.model.clone(), Style::default().fg(theme.muted)),
     ];
 
-    if app.project_config {
-        spans.push(Span::styled("  ·  ", Style::default().fg(theme.line)));
-        spans.push(Span::styled("project config", Style::default().fg(theme.accent)));
-    }
-
     if !app.agents.is_empty() {
         spans.push(Span::styled("  ·  ", Style::default().fg(theme.line)));
         spans.push(Span::styled(

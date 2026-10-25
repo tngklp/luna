@@ -387,18 +387,18 @@ export type UiResponseDto =
   | { id: string; confirmed: boolean }
   | { id: string; decision: 'allow' | 'deny' }
 
-/** What PiUI does before running a tool. */
+/** What Luna does before running a tool. */
 export type ApprovalAction = 'allow' | 'ask' | 'deny'
 
 /** Tools the approval list shows, in display order. */
 export const APPROVAL_TOOLS = [
   'read',
-  'bash',
-  'powershell',
-  'edit',
   'write',
+  'edit',
+  'multi_edit',
+  'bash',
   'grep',
-  'find',
+  'glob',
   'ls'
 ] as const
 
@@ -411,7 +411,7 @@ export interface ApprovalConfig {
   tools: Record<string, ApprovalAction>
 }
 
-/** One model definition inside a provider entry of `models.json`. */
+/** One model definition inside a provider entry of `config.toml`. */
 export interface ModelDefDto {
   id: string
   name: string
@@ -423,12 +423,18 @@ export interface ModelDefDto {
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number }
 }
 
-/** One provider entry of `models.json`. */
+/** One provider entry of `config.toml`. */
 export interface ProviderConfigDto {
   id: string
-  baseUrl: string
-  api: string
-  apiKey: string
+  /** A built-in preset to inherit from, e.g. `groq`. */
+  preset: string | null
+  /** `openai`, `anthropic` or `gemini`. */
+  kind: string
+  baseUrl: string | null
+  /** Environment variable the key is read from. */
+  apiKeyEnv: string | null
+  /** Whether the endpoint can list its own models. */
+  discoverModels: boolean
   models: ModelDefDto[]
 }
 
@@ -440,10 +446,11 @@ export interface FormatResultDto {
   error: string | null
 }
 
-/** The provider/model catalogue PiUI edits, persisted as `<agentDir>/models.json`. */
+/** The provider/model catalogue Luna edits, persisted in `config.toml`. */
 export interface ModelsConfigDto {
   /** Absolute path of the file the catalogue is read from. */
   path: string
+  defaultModel: string
   providers: ProviderConfigDto[]
 }
 

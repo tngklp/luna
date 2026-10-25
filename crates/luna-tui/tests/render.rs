@@ -34,8 +34,7 @@ fn app() -> App {
         store,
         std::sync::Arc::new(luna_core::event::NullSink),
         runtime.handle().clone(),
-        "/work/.luna/config.toml".to_string(),
-        true,
+        "/home/dev/.luna/config.toml".to_string(),
     )
     .unwrap()
 }
@@ -73,7 +72,7 @@ fn the_header_shows_the_model_and_config_source() {
     let screen = render(&app(), 120, 24);
     assert!(screen.contains("luna"), "{screen}");
     assert!(screen.contains("anthropic/claude-sonnet-4-5"), "{screen}");
-    assert!(screen.contains("project config"), "{screen}");
+    assert!(screen.contains(".luna/config.toml"), "{screen}");
 }
 
 #[test]

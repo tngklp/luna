@@ -151,6 +151,12 @@ async fn run_turn(
 ) -> Result<(), String> {
     state.set_streaming(true);
 
+    // The first prompt is what turns a draft into a saved session.
+    if let Err(err) = state.ensure_transcript() {
+        state.set_streaming(false);
+        return Err(error(err));
+    }
+
     let taken = state.session.lock().ok().and_then(|mut slot| slot.take());
     let Some(mut session) = taken else {
         state.set_streaming(false);
@@ -212,8 +218,10 @@ pub fn abort(state: Shared) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn new_session(state: Shared) -> Result<(), String> {
-    state.start_session().map_err(error)
+pub fn new_session(state: Shared<'_>) -> Result<(), String> {
+    // Only opens a fresh chat window; the transcript is written on the first
+    // prompt, so an abandoned draft leaves nothing behind.
+    state.start_draft().map_err(error)
 }
 
 #[tauri::command]
@@ -496,56 +504,74 @@ pub fn read_file(path: String) -> FsFileDto {
 }
 
 #[tauri::command]
-pub fn get_models_config(state: Shared) -> Result<ModelsConfigDto, String> {
+pub fn get_models_config(state: Shared<'_>) -> Result<ModelsConfigDto, String> {
     let config = state.config.lock().map_err(error)?.clone();
     Ok(ModelsConfigDto {
+        path: state.paths.config_file().display().to_string(),
+        default_model: config.general.default_model.clone(),
         providers: config
             .providers
             .iter()
-            .map(|(name, provider)| {
-                (
-                    name.clone(),
-                    ProviderConfigDto {
-                        kind: match provider.kind {
-                            ProviderKind::Openai => "openai".to_string(),
-                            ProviderKind::Anthropic => "anthropic".to_string(),
-                            ProviderKind::Gemini => "gemini".to_string(),
-                        },
-                        base_url: provider.base_url.clone(),
-                        api_key_env: provider.api_key_env.clone(),
-                        models: provider.models.clone(),
-                    },
-                )
+            .map(|(name, provider)| ProviderConfigDto {
+                id: name.clone(),
+                preset: provider.preset.clone(),
+                kind: match provider.kind {
+                    ProviderKind::Openai => "openai".to_string(),
+                    ProviderKind::Anthropic => "anthropic".to_string(),
+                    ProviderKind::Gemini => "gemini".to_string(),
+                },
+                base_url: provider.base_url.clone(),
+                api_key_env: provider.api_key_env.clone(),
+                discover_models: provider.discover_models,
+                models: provider
+                    .models
+                    .iter()
+                    .map(|model| {
+                        ModelDefDto::from(luna_core::catalog::describe(name, model))
+                    })
+                    .collect(),
             })
             .collect(),
-        default_model: config.general.default_model.clone(),
     })
 }
 
 #[tauri::command]
-pub fn set_models_config(state: Shared, config: ModelsConfigDto) -> Result<ModelsUpdateResultDto, String> {
+pub fn set_models_config(
+    state: Shared<'_>,
+    config: ModelsConfigDto,
+) -> Result<ModelsUpdateResultDto, String> {
     let mut settings = state.config.lock().map_err(error)?.clone();
     settings.general.default_model = config.default_model.clone();
-    for (name, provider) in &config.providers {
+
+    // Replace the provider table wholesale: the dialog is the source of truth,
+    // so a provider the user removed must disappear.
+    settings.providers.clear();
+    for provider in &config.providers {
         let kind = match provider.kind.as_str() {
             "anthropic" => ProviderKind::Anthropic,
             "gemini" => ProviderKind::Gemini,
             _ => ProviderKind::Openai,
         };
         settings.providers.insert(
-            name.clone(),
+            provider.id.clone(),
             ProviderConfig {
-                preset: None,
+                preset: provider.preset.clone(),
                 kind,
                 base_url: provider.base_url.clone(),
                 api_key: None,
                 api_key_env: provider.api_key_env.clone(),
                 headers: Default::default(),
-                models: provider.models.clone(),
-                discover_models: true,
+                models: provider
+                    .models
+                    .iter()
+                    .map(|model| model.id.clone())
+                    .filter(|id| !id.trim().is_empty())
+                    .collect(),
+                discover_models: provider.discover_models,
             },
         );
     }
+    settings.normalize();
     settings.save(&state.paths).map_err(error)?;
 
     let registry = Arc::new(ProviderRegistry::new(&settings));
@@ -556,7 +582,7 @@ pub fn set_models_config(state: Shared, config: ModelsConfigDto) -> Result<Model
     if let Ok(mut stored) = state.config.lock() {
         *stored = settings;
     }
-    Ok(ModelsUpdateResultDto { models })
+    Ok(ModelsUpdateResultDto { config, models, error: None })
 }
 
 #[tauri::command]

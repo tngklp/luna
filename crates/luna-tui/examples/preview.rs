@@ -23,8 +23,7 @@ fn main() {
         store,
         std::sync::Arc::new(luna_core::event::NullSink),
         runtime.handle().clone(),
-        "/work/.luna/config.toml".to_string(),
-        true,
+        "/home/dev/.luna/config.toml".to_string(),
     )
     .unwrap();
 

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { DialogHost } from './components/DialogHost'
 import { MainPane } from './components/MainPane'
+import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { StatusFooter } from './components/StatusFooter'
 import { UpdateToast } from './components/UpdateToast'
@@ -55,6 +56,7 @@ export default function App() {
       </div>
 
       <DialogHost />
+      <SettingsDialog />
       <UpdateToast />
     </>
   )

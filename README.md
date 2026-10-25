@@ -63,19 +63,20 @@ cd gui && npm install && npm run tauri:build
 
 ## Configure
 
-Luna writes `.luna/config.toml` in the working directory on first run, so the
-settings a session used are visible in the repository.
+Luna keeps everything in one directory, `~/.luna`:
 
-| Location | When it is used |
+| Path | Contents |
 |---|---|
-| `./.luna/config.toml` | Always, when it exists. Written on first run. |
-| `%APPDATA%\luna\config\config.toml` (Windows) | Fallback when the project has none. |
-| `~/.config/luna/config.toml` (Linux) | Fallback when the project has none. |
-| `~/Library/Application Support/luna/config.toml` (macOS) | Fallback when the project has none. |
+| `~/.luna/config.toml` | Providers, models, roles, approvals |
+| `~/.luna/sessions/` | Session transcripts (JSONL) |
+| `~/.luna/luna.db` | Session index and change log |
 
-A project config wins over the per-user one, so a repo can pin its own model and
-approvals without touching your global settings. Add `.luna/` to `.gitignore` if
-you would rather not commit it.
+The config is written on first run. Nothing is created in your working
+directory, so launching Luna in a fresh folder leaves it untouched.
+
+Most settings are also editable in the app: **Settings → Models** for providers
+and models, **Settings → Tools** for the approval policy, **Settings → General**
+for behaviour, and **Settings → Customization** for the theme.
 
 ```toml
 [general]
@@ -227,6 +228,18 @@ the run state, thinking level, context usage, tokens and cost.
 The GUI is the chat surface from [PiUI](https://github.com/tngklp/piui), ported
 to Tauri. It opens straight into the chat. `Ctrl+N` starts a session, `Ctrl+K`
 searches, and the composer switches to steering while a turn is running.
+
+**New session** only opens a fresh chat window — the transcript is written when
+you send the first prompt, so an abandoned draft leaves nothing behind.
+
+Settings live behind the gear at the bottom of the sidebar:
+
+| Tab | What it controls |
+|---|---|
+| General | Reasoning and tool-output expansion, auto-keep, send key, workspace |
+| Models | Providers, base URLs, key variables, protocols, and model definitions |
+| Customization | Theme and icon pack |
+| Tools | Approval policy, per tool class |
 
 ## How it works
 

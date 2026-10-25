@@ -56,8 +56,7 @@ fn main() -> Result<()> {
         config.general.default_model = model;
     }
     let config_path = paths.config_file().display().to_string();
-    let project_config = paths.uses_project_config();
-    let store = SessionStore::open(&paths.data_dir)?;
+    let store = SessionStore::open(&paths.root)?;
     let providers = Arc::new(ProviderRegistry::new(&config));
 
     let runtime =
@@ -65,15 +64,7 @@ fn main() -> Result<()> {
 
     let sink: SinkRef = Arc::new(luna_core::event::NullSink);
 
-    let mut app = App::new(
-        config,
-        providers,
-        store,
-        sink,
-        runtime.handle().clone(),
-        config_path,
-        project_config,
-    )?;
+    let mut app = App::new(config, providers, store, sink, runtime.handle().clone(), config_path)?;
 
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
