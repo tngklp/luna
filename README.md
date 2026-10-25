@@ -260,6 +260,36 @@ cd gui && npm run sidecar           # copy it into place
 CI uses for `cargo check`. Release builds use the strict form so a placeholder can
 never be bundled.
 
+## Releasing
+
+Releases are **manual only** — nothing is published on a normal push. To cut one:
+
+1. Add the version's section to [CHANGELOG.md](CHANGELOG.md):
+
+   ```markdown
+   ## [0.2.0] — 2026-11-02
+
+   ### Added
+   - …
+   ```
+
+2. Run the **Release** workflow from the Actions tab (or `gh workflow run release.yml -f version=0.2.0`).
+
+The workflow then:
+
+- validates the version and refuses to reuse an existing tag,
+- reads that version's section from the changelog and uses it as the release body,
+- builds the TUI for six targets and the desktop app for four,
+- creates the tag and the release, and attaches every artifact plus `checksums.txt`.
+
+The `version` input accepts `0.2.0` or `v0.2.0`. `prerelease` and `draft` are
+optional flags.
+
+```sh
+gh workflow run release.yml -f version=0.2.0
+gh run watch
+```
+
 ### Layout
 
 ```
@@ -273,7 +303,7 @@ crates/luna-tui/      the terminal interface
 gui/                  the Tauri app
   src/                the ported PiUI chat surface
   src-tauri/          commands, DTOs, state
-scripts/              icon generation, sidecar staging
+scripts/              icon generation, sidecar staging, changelog extraction
 ```
 
 ## Credits

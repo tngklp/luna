@@ -123,6 +123,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Shell syntax
         run: sh -n install.sh
 
@@ -137,3 +141,11 @@ jobs:
             exit 1
           }
           Write-Host 'install.ps1 parses cleanly'
+
+      # The release workflow reads its notes from CHANGELOG.md, so a broken
+      # extractor would break every release.
+      - name: Changelog extractor
+        run: node --test scripts/changelog.test.mjs
+
+      - name: Changelog has the current version
+        run: node scripts/changelog.mjs "$(node -p "require('./gui/package.json').version")" --check
