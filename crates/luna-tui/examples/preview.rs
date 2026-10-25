@@ -50,7 +50,7 @@ fn main() {
     println!("\n=== conversation ===");
     print_buffer(&term);
 
-    app.input = "/".into();
+    app.editor.set("/");
     app.palette = Palette::from_input("/");
     term.draw(|f| luna_tui::ui::draw(f, &app)).unwrap();
     println!("\n=== palette ===");

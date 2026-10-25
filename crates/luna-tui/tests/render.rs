@@ -130,7 +130,7 @@ fn a_failed_tool_is_marked() {
 #[test]
 fn the_palette_lists_commands_when_open() {
     let mut app = app();
-    app.input = "/".into();
+    app.editor.set("/");
     app.palette = Palette::from_input("/");
     let screen = render(&app, 100, 30);
     assert!(screen.contains("/help"), "{screen}");
@@ -141,7 +141,7 @@ fn the_palette_lists_commands_when_open() {
 #[test]
 fn the_palette_filters_as_you_type() {
     let mut app = app();
-    app.input = "/mo".into();
+    app.editor.set("/mo");
     app.palette = Palette::from_input("/mo");
     let screen = render(&app, 100, 30);
     assert!(screen.contains("/model"), "{screen}");
@@ -151,7 +151,7 @@ fn the_palette_filters_as_you_type() {
 #[test]
 fn the_palette_says_when_nothing_matches() {
     let mut app = app();
-    app.input = "/zzz".into();
+    app.editor.set("/zzz");
     app.palette = Palette::from_input("/zzz");
     let screen = render(&app, 100, 30);
     assert!(screen.contains("no command matches"), "{screen}");

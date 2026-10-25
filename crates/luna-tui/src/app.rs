@@ -27,6 +27,7 @@ use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::commands::Palette;
+use crate::render::Editor;
 use crate::theme::Theme;
 
 /// A line in the transcript, already flattened for rendering.
@@ -97,8 +98,8 @@ pub struct App {
     pub config: Config,
     pub theme: Theme,
     pub lines: Vec<Line>,
-    pub input: String,
-    pub cursor: usize,
+    /// The composer's buffer, with character-aware editing.
+    pub editor: Editor,
     pub scroll: usize,
     pub follow: bool,
     pub mode: Mode,
@@ -109,16 +110,26 @@ pub struct App {
     pub model: String,
     pub thinking: ThinkingLevel,
     pub running: bool,
+    /// Plan mode: the agent may read but not write.
+    pub plan_mode: bool,
     pub agents: Vec<(String, String, String)>,
+    /// Whether the agents pane is showing.
+    pub show_agents: bool,
     pub sessions: Vec<String>,
     pub show_sessions: bool,
+    /// Index into `sessions` while the picker is open.
+    pub session_cursor: usize,
     pub should_quit: bool,
     pub tokens_in: u32,
     pub tokens_out: u32,
     pub cost: f64,
     pub context_percent: f32,
+    /// Tokens used per turn, for the sparkline.
+    pub turn_tokens: Vec<u64>,
     /// Where the config was read from, shown in the header.
     pub config_path: String,
+    /// The theme directory, for `--theme`.
+    pub theme_dir: std::path::PathBuf,
 
     providers: Arc<ProviderRegistry>,
     store: SessionStore,
@@ -144,6 +155,21 @@ impl App {
         handle: Handle,
         config_path: String,
     ) -> Result<App> {
+        App::with_options(config, providers, store, _sink, handle, config_path, None, None)
+    }
+
+    /// Build the app, optionally resuming a session and choosing a theme.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_options(
+        config: Config,
+        providers: Arc<ProviderRegistry>,
+        store: SessionStore,
+        _sink: SinkRef,
+        handle: Handle,
+        config_path: String,
+        resume: Option<String>,
+        theme_name: Option<String>,
+    ) -> Result<App> {
         let (event_tx, events) = unbounded_channel();
         let (approval_tx, approvals) = unbounded_channel();
         let sink: SinkRef = Arc::new(ChannelSink { sender: event_tx.clone() });
@@ -154,13 +180,18 @@ impl App {
             .map(|list| list.into_iter().map(|summary| summary.path).collect())
             .unwrap_or_default();
 
+        let theme_dir = luna_core::config::Paths::resolve().root.join("themes");
+        let theme = match &theme_name {
+            Some(name) => Theme::load(name, &theme_dir),
+            None => Theme::dark(),
+        };
+
         let mut app = App {
-            theme: Theme::dark(),
+            theme,
             // The transcript starts empty: the header already says what this is,
             // and a greeting would push the first real message down the screen.
             lines: Vec::new(),
-            input: String::new(),
-            cursor: 0,
+            editor: Editor::new(),
             scroll: 0,
             follow: true,
             mode: Mode::Normal,
@@ -170,15 +201,20 @@ impl App {
             model,
             thinking: ThinkingLevel::Medium,
             running: false,
+            plan_mode: false,
             agents: Vec::new(),
+            show_agents: false,
             sessions,
             show_sessions: false,
+            session_cursor: 0,
             should_quit: false,
             tokens_in: 0,
             tokens_out: 0,
             cost: 0.0,
             context_percent: 0.0,
+            turn_tokens: Vec::new(),
             config_path,
+            theme_dir,
             config,
             providers,
             store,
@@ -195,8 +231,58 @@ impl App {
             last_frame: Instant::now(),
         };
 
-        app.start_session()?;
+        match resume {
+            Some(path) => app.resume_session(&path)?,
+            None => app.start_session()?,
+        }
         Ok(app)
+    }
+
+    /// Open a saved session and replay it into the transcript.
+    fn resume_session(&mut self, path: &str) -> Result<()> {
+        let transcript = self.store.open_transcript(std::path::Path::new(path))?;
+        let header = transcript.header().clone();
+        let cwd = std::path::PathBuf::from(&header.cwd);
+        let system = build_system(&self.config, &cwd, None);
+
+        let deps = Arc::new(
+            AgentDeps::new(self.providers.clone(), self.sink.clone(), &cwd)
+                .with_ui(Arc::new(TuiUi { sender: self.approval_tx.clone() })),
+        );
+        let orchestrator = Arc::new(Orchestrator::new(
+            deps.clone(),
+            self.config.clone(),
+            AgentRef::root(&header.id),
+        ));
+        let mut session =
+            AgentSession::new(deps, AgentRef::root(&header.id), &header.model, system);
+        session.messages = transcript.messages().to_vec();
+        self.model = header.model.clone();
+
+        // Replay the conversation so the screen matches the session.
+        for message in transcript.messages() {
+            match message.role {
+                luna_core::types::Role::User => {
+                    self.lines.push(Line::User(message.text()));
+                }
+                luna_core::types::Role::Assistant => {
+                    let text = message.text();
+                    if !text.is_empty() {
+                        self.lines.push(Line::Assistant(text));
+                    }
+                }
+                luna_core::types::Role::Tool => {
+                    self.lines.push(Line::ToolOutput(message.text()));
+                }
+                luna_core::types::Role::System => {}
+            }
+        }
+
+        self.transcript = Some(transcript);
+        *self.session.lock().unwrap() = Some(session);
+        self.orchestrator = Some(orchestrator);
+        self.follow = true;
+        Ok(())
     }
 
     /// Create a fresh session and agent.
@@ -249,8 +335,7 @@ impl App {
                         _ => {}
                     },
                     Event::Paste(text) => {
-                        self.input.insert_str(self.cursor, &text);
-                        self.cursor += text.len();
+                        self.editor.insert_str(&text);
                         self.sync_palette();
                         self.dirty = true;
                     }
@@ -272,6 +357,12 @@ impl App {
             return;
         }
 
+        // The session picker owns the arrows and Enter while it is open.
+        if self.show_sessions && self.session_picker_key(key) {
+            self.dirty = true;
+            return;
+        }
+
         // The palette owns the arrows and Enter while it is open.
         if self.palette.is_some() && self.palette_key(key) {
             self.dirty = true;
@@ -279,6 +370,7 @@ impl App {
         }
 
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
             KeyCode::Char('c') if ctrl => self.should_quit = true,
             KeyCode::Char('d') if ctrl => self.should_quit = true,
@@ -289,21 +381,50 @@ impl App {
             }
             KeyCode::Char('s') if ctrl => {
                 self.show_sessions = !self.show_sessions;
+                self.session_cursor = 0;
                 self.refresh_sessions();
+                self.dirty = true;
+            }
+            KeyCode::Char('a') if ctrl => {
+                self.show_agents = !self.show_agents;
+                self.dirty = true;
+            }
+            KeyCode::Char('p') if ctrl => {
+                self.plan_mode = !self.plan_mode;
+                self.lines.push(Line::Notice {
+                    level: "info".into(),
+                    text: if self.plan_mode {
+                        "plan mode: the agent may read but not write".into()
+                    } else {
+                        "plan mode off".into()
+                    },
+                });
+                self.dirty = true;
+            }
+            KeyCode::Char('y') if ctrl => {
+                let text = transcript_text(&self.lines);
+                match copy_to_clipboard(&text) {
+                    Ok(()) => self.lines.push(Line::Notice {
+                        level: "info".into(),
+                        text: format!("copied {} characters", text.chars().count()),
+                    }),
+                    Err(err) => self.lines.push(Line::Error(format!("could not copy: {err}"))),
+                }
                 self.dirty = true;
             }
             KeyCode::Esc => {
                 if self.palette.is_some() {
                     self.palette = None;
+                } else if self.show_sessions {
+                    self.show_sessions = false;
                 } else if self.running {
                     self.abort();
-                } else {
-                    self.show_sessions = false;
                 }
             }
             KeyCode::Enter => {
                 if key.modifiers.contains(KeyModifiers::SHIFT) {
-                    self.insert_char('\n');
+                    self.editor.insert('\n');
+                    self.sync_palette();
                 } else {
                     self.submit();
                 }
@@ -311,22 +432,40 @@ impl App {
             KeyCode::Tab => {
                 if let Some(palette) = &self.palette {
                     if let Some(completion) = palette.completion() {
-                        self.input = completion;
-                        self.cursor = self.input.len();
+                        self.editor.set(completion);
                         self.sync_palette();
                     }
                 }
             }
-            KeyCode::Char(ch) => self.insert_char(ch),
-            KeyCode::Backspace => self.backspace(),
-            KeyCode::Delete => self.delete_forward(),
-            KeyCode::Left => self.cursor = self.cursor.saturating_sub(1),
-            KeyCode::Right => self.cursor = (self.cursor + 1).min(self.input.len()),
-            KeyCode::Home => self.cursor = 0,
-            KeyCode::End => self.cursor = self.input.len(),
+            KeyCode::Char('w') if ctrl => {
+                self.editor.delete_word();
+                self.sync_palette();
+            }
+            KeyCode::Char('u') if ctrl => {
+                self.editor.delete_to_line_start();
+                self.sync_palette();
+            }
+            KeyCode::Char(ch) if !ctrl && !alt => {
+                self.editor.insert(ch);
+                self.sync_palette();
+            }
+            KeyCode::Backspace => {
+                self.editor.backspace();
+                self.sync_palette();
+            }
+            KeyCode::Delete => {
+                self.editor.delete();
+                self.sync_palette();
+            }
+            KeyCode::Left => self.editor.left(),
+            KeyCode::Right => self.editor.right(),
+            KeyCode::Home => self.editor.home(),
+            KeyCode::End => self.editor.end(),
             KeyCode::Up => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     self.scroll_up(1);
+                } else if self.editor.row() > 0 {
+                    self.editor.up();
                 } else {
                     self.scroll_up(3);
                 }
@@ -334,6 +473,8 @@ impl App {
             KeyCode::Down => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     self.scroll_down(1);
+                } else if self.editor.row() + 1 < self.editor.text().matches('\n').count() + 1 {
+                    self.editor.down();
                 } else {
                     self.scroll_down(3);
                 }
@@ -343,6 +484,36 @@ impl App {
             _ => {}
         }
         self.dirty = true;
+    }
+
+    /// Handle a key while the session picker is open. Returns true when used.
+    fn session_picker_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Up => {
+                self.session_cursor = self.session_cursor.saturating_sub(1);
+                true
+            }
+            KeyCode::Down => {
+                if self.session_cursor + 1 < self.sessions.len() {
+                    self.session_cursor += 1;
+                }
+                true
+            }
+            KeyCode::Enter => {
+                if let Some(path) = self.sessions.get(self.session_cursor).cloned() {
+                    self.show_sessions = false;
+                    if let Err(err) = self.resume_session(&path) {
+                        self.lines.push(Line::Error(err.to_string()));
+                    }
+                }
+                true
+            }
+            KeyCode::Esc => {
+                self.show_sessions = false;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Handle a key while the palette is open. Returns true when it was used.
@@ -359,8 +530,7 @@ impl App {
             }
             KeyCode::Tab => {
                 if let Some(completion) = palette.completion() {
-                    self.input = completion;
-                    self.cursor = self.input.len();
+                    self.editor.set(completion);
                     self.sync_palette();
                 }
                 true
@@ -369,11 +539,10 @@ impl App {
                 // Enter accepts the highlighted command rather than sending it,
                 // so a half-typed command never reaches the agent.
                 if let Some(completion) = palette.completion() {
-                    self.input = completion;
-                    self.cursor = self.input.len();
+                    self.editor.set(completion);
                     self.palette = None;
                     // A command with no argument can run immediately.
-                    if !self.input.ends_with(' ') {
+                    if !self.editor.text().ends_with(' ') {
                         self.submit();
                     }
                 }
@@ -385,35 +554,7 @@ impl App {
 
     /// Recompute the palette from the composer.
     fn sync_palette(&mut self) {
-        self.palette = Palette::from_input(&self.input);
-    }
-
-    fn insert_char(&mut self, ch: char) {
-        self.input.insert(self.cursor, ch);
-        self.cursor += ch.len_utf8();
-        self.sync_palette();
-    }
-
-    fn backspace(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        // Step back one whole character, not one byte.
-        let mut index = self.cursor - 1;
-        while index > 0 && !self.input.is_char_boundary(index) {
-            index -= 1;
-        }
-        self.input.remove(index);
-        self.cursor = index;
-        self.sync_palette();
-    }
-
-    fn delete_forward(&mut self) {
-        if self.cursor >= self.input.len() {
-            return;
-        }
-        self.input.remove(self.cursor);
-        self.sync_palette();
+        self.palette = Palette::from_input(self.editor.text());
     }
 
     fn scroll_up(&mut self, amount: usize) {
@@ -468,12 +609,11 @@ impl App {
 
     /// Send the composer contents.
     fn submit(&mut self) {
-        let text = self.input.trim().to_string();
+        let text = self.editor.text().trim().to_string();
         if text.is_empty() {
             return;
         }
-        self.input.clear();
-        self.cursor = 0;
+        self.editor.clear();
         self.palette = None;
 
         if text.starts_with('/') {
@@ -498,14 +638,25 @@ impl App {
         self.status = "thinking".into();
         self.dirty = true;
 
+        // Plan mode restricts the agent to read-only tools for this turn.
+        if self.plan_mode {
+            if let Some(session) = self.session.lock().unwrap().as_mut() {
+                session.messages.push(luna_core::types::Message::user(format!(
+                    "{text}\n\n[Plan mode: investigate and propose a plan. Do not modify \
+                     any files or run commands that change state.]"
+                )));
+            }
+        }
+
         let session = self.session.clone();
         let sender = self.event_tx.clone();
+        let prompt = if self.plan_mode { String::new() } else { text };
         self.handle.spawn(async move {
             // Take the session out for the duration of the turn so the UI thread
             // never blocks on it, then put it back.
             let taken = session.lock().unwrap().take();
             let Some(mut agent) = taken else { return };
-            let outcome = agent.run_turn(text).await;
+            let outcome = agent.run_turn(prompt).await;
             if let Err(err) = outcome {
                 let _ = sender.send(Emitted::notice("error", err.to_string()));
             }
@@ -624,12 +775,22 @@ impl App {
     fn refresh_stats(&mut self) {
         let Ok(guard) = self.session.lock() else { return };
         let Some(session) = guard.as_ref() else { return };
+        let previous = self.tokens_in + self.tokens_out;
         self.tokens_in = session.stats.usage.input;
         self.tokens_out = session.stats.usage.output;
         self.cost = session.stats.cost;
         let window = session.model_info().context_window.max(1);
         let used = luna_core::tokens::estimate_messages(&session.messages);
         self.context_percent = (used as f32 / window as f32) * 100.0;
+
+        // One sample per turn, for the sparkline.
+        let total = self.tokens_in + self.tokens_out;
+        if total > previous {
+            self.turn_tokens.push((total - previous) as u64);
+            if self.turn_tokens.len() > 40 {
+                self.turn_tokens.remove(0);
+            }
+        }
     }
 
     /// Apply everything the agent produced since the last frame.

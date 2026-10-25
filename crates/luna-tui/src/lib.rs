@@ -7,5 +7,6 @@ pub mod app;
 pub mod commands;
 pub mod headless;
 pub mod highlight;
+pub mod render;
 pub mod theme;
 pub mod ui;

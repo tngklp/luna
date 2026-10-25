@@ -86,7 +86,16 @@ fn main() -> Result<()> {
 
     let sink: SinkRef = Arc::new(luna_core::event::NullSink);
 
-    let mut app = App::new(config, providers, store, sink, runtime.handle().clone(), config_path)?;
+    let mut app = App::with_options(
+        config,
+        providers,
+        store,
+        sink,
+        runtime.handle().clone(),
+        config_path,
+        parse_resume(&args)?,
+        parse_theme(&args),
+    )?;
 
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -188,6 +197,31 @@ fn exit_code(code: i32) -> Result<()> {
     } else {
         std::process::exit(code)
     }
+}
+
+/// Read `--resume [path]`.
+///
+/// With no path, the most recent session is resumed.
+fn parse_resume(args: &[String]) -> Result<Option<String>> {
+    let Some(index) = args.iter().position(|arg| arg == "--resume" || arg == "-r") else {
+        return Ok(None);
+    };
+    // A following argument that is not a flag is the path.
+    if let Some(value) = args.get(index + 1) {
+        if !value.starts_with('-') {
+            return Ok(Some(value.clone()));
+        }
+    }
+    let paths = Paths::resolve();
+    let store = SessionStore::open(&paths.root)?;
+    let latest = store.list().ok().and_then(|list| list.into_iter().next());
+    Ok(latest.map(|summary| summary.path))
+}
+
+/// Read `--theme <name>`.
+fn parse_theme(args: &[String]) -> Option<String> {
+    let index = args.iter().position(|arg| arg == "--theme")?;
+    args.get(index + 1).cloned()
 }
 
 #[cfg(test)]

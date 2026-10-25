@@ -45,22 +45,28 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
 
     draw_header(frame, rows[0], app);
 
-    let columns = if app.show_sessions {
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(34), Constraint::Min(20)])
-            .split(rows[1])
-    } else {
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(20)])
-            .split(rows[1])
-    };
-
+    // The transcript sits between an optional session list and an optional
+    // agents pane.
+    let mut constraints = Vec::new();
     if app.show_sessions {
-        draw_sessions(frame, columns[0], app);
+        constraints.push(Constraint::Length(34));
     }
-    draw_transcript(frame, *columns.last().unwrap(), app);
+    constraints.push(Constraint::Min(20));
+    if app.show_agents {
+        constraints.push(Constraint::Length(30));
+    }
+    let columns =
+        Layout::default().direction(Direction::Horizontal).constraints(constraints).split(rows[1]);
+
+    let mut index = 0;
+    if app.show_sessions {
+        draw_sessions(frame, columns[index], app);
+        index += 1;
+    }
+    draw_transcript(frame, columns[index], app);
+    if app.show_agents {
+        draw_agents(frame, columns[index + 1], app);
+    }
 
     if palette_height(app) > 0 {
         draw_palette(frame, rows[2], app);
@@ -71,12 +77,15 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     if app.mode == Mode::Approval {
         draw_approval(frame, area, app);
     }
+    if app.show_sessions {
+        draw_session_picker(frame, area, app);
+    }
 
     let _ = theme;
 }
 
 fn composer_height(app: &App) -> u16 {
-    let lines = app.input.lines().count().max(1) as u16;
+    let lines = app.editor.text().lines().count().max(1) as u16;
     (lines + 2).min(10)
 }
 
@@ -265,6 +274,13 @@ fn render_line(out: &mut Vec<TextLine<'static>>, line: &Line, theme: &Theme, wid
             out.push(TextLine::from(spans).style(Style::default().bg(background)));
         }
         Line::ToolOutput(text) => {
+            // A unified diff reads far better coloured than as plain text.
+            if text.contains("@@ ") && (text.contains("\n+") || text.contains("\n-")) {
+                for line in crate::render::render_diff(text, theme, width.saturating_sub(4)) {
+                    out.push(line);
+                }
+                return;
+            }
             for wrapped in wrap(text, width.saturating_sub(4)) {
                 out.push(TextLine::from(Span::styled(
                     format!("    {wrapped}"),
@@ -569,18 +585,17 @@ fn draw_composer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let text = if app.input.is_empty() {
+    let text = if app.editor.is_empty() {
         Span::styled("Ask Luna to build something…", Style::default().fg(theme.dim))
     } else {
-        Span::styled(app.input.clone(), Style::default().fg(theme.text))
+        Span::styled(app.editor.text().to_string(), Style::default().fg(theme.text))
     };
     frame.render_widget(Paragraph::new(TextLine::from(text)).wrap(Wrap { trim: false }), inner);
 
     // Place the cursor where the user is typing.
     if app.mode == Mode::Normal {
-        let before = &app.input[..app.cursor.min(app.input.len())];
-        let row = before.matches('\n').count() as u16;
-        let column = before.rsplit('\n').next().unwrap_or("").chars().count() as u16;
+        let row = app.editor.row() as u16;
+        let column = app.editor.column() as u16;
         let x = inner.x + column.min(inner.width.saturating_sub(1));
         let y = inner.y + row.min(inner.height.saturating_sub(1));
         frame.set_cursor_position((x, y));
@@ -611,6 +626,20 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, app: &App) {
         spans.push(Span::styled(" │ ", Style::default().fg(theme.line)));
         spans.push(Span::styled(format!("${:.4}", app.cost), Style::default().fg(theme.dim)));
     }
+    if !app.turn_tokens.is_empty() {
+        spans.push(Span::styled(" │ ", Style::default().fg(theme.line)));
+        spans.push(Span::styled(
+            crate::render::sparkline(&app.turn_tokens),
+            Style::default().fg(theme.accent),
+        ));
+    }
+    if app.plan_mode {
+        spans.push(Span::styled(" │ ", Style::default().fg(theme.line)));
+        spans.push(Span::styled(
+            "plan",
+            Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+        ));
+    }
     spans.push(Span::styled(" │ ", Style::default().fg(theme.line)));
     spans.push(Span::styled(app.status.clone(), Style::default().fg(theme.dim)));
 
@@ -618,6 +647,93 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Paragraph::new(TextLine::from(spans)).style(Style::default().bg(theme.panel)),
         area,
     );
+}
+
+/// The live agent tree, shown beside the transcript.
+fn draw_agents(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let block = Block::default()
+        .borders(Borders::LEFT)
+        .border_style(Style::default().fg(theme.line))
+        .style(Style::default().bg(theme.panel));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<TextLine> = Vec::new();
+    lines.push(TextLine::from(Span::styled(
+        " Agents",
+        Style::default().fg(theme.muted).add_modifier(Modifier::BOLD),
+    )));
+    lines.push(TextLine::from(""));
+
+    if app.agents.is_empty() {
+        lines.push(TextLine::from(Span::styled("  none running", Style::default().fg(theme.dim))));
+    }
+    for (id, role, title) in app.agents.iter().take(inner.height.saturating_sub(3) as usize) {
+        lines.push(TextLine::from(vec![
+            Span::styled("  ◐ ", Style::default().fg(theme.warning)),
+            Span::styled(role.clone(), Style::default().fg(theme.accent)),
+        ]));
+        lines.push(TextLine::from(Span::styled(
+            format!("    {title}"),
+            Style::default().fg(theme.text),
+        )));
+        lines.push(TextLine::from(Span::styled(
+            format!("    {id}"),
+            Style::default().fg(theme.dim),
+        )));
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The session picker, shown over the transcript.
+fn draw_session_picker(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let width = area.width.min(80);
+    let height = (app.sessions.len() as u16 + 4).min(area.height.saturating_sub(2)).max(6);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+
+    frame.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.border_accent))
+        .title(Span::styled(" sessions ", Style::default().fg(theme.accent)))
+        .style(Style::default().bg(theme.raise));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let mut lines: Vec<TextLine> = Vec::new();
+    if app.sessions.is_empty() {
+        lines.push(TextLine::from(Span::styled(
+            "  no saved sessions",
+            Style::default().fg(theme.dim),
+        )));
+    }
+    for (index, path) in app.sessions.iter().take(inner.height as usize).enumerate() {
+        let selected = index == app.session_cursor;
+        let name = std::path::Path::new(path)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+        let line = TextLine::from(vec![
+            Span::styled(if selected { "› " } else { "  " }, Style::default().fg(theme.accent)),
+            Span::styled(
+                name,
+                Style::default().fg(if selected { theme.text } else { theme.muted }),
+            ),
+        ]);
+        lines.push(if selected {
+            line.style(Style::default().bg(theme.selected_bg))
+        } else {
+            line
+        });
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_approval(frame: &mut Frame<'_>, area: Rect, app: &App) {
