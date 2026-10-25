@@ -227,53 +227,36 @@ pub fn new_session(state: Shared<'_>) -> Result<(), String> {
 #[tauri::command]
 pub async fn compact(state: Shared<'_>, custom_instructions: Option<String>) -> Result<(), String> {
     let _ = custom_instructions;
-    // Compaction is automatic inside the loop; asking for it explicitly just
-    // nudges the next turn, so report that rather than pretending to run it.
-    state.notice("info", "compaction runs automatically when the context fills");
-    Ok(())
+    let taken = state.session.lock().ok().and_then(|mut slot| slot.take());
+    let Some(mut session) = taken else {
+        return Err("no session is open".to_string());
+    };
+    let outcome = session.compact().await;
+    if let Ok(mut slot) = state.session.lock() {
+        *slot = Some(session);
+    }
+    state.persist();
+    outcome.map_err(error)
 }
 
 #[tauri::command]
 pub async fn edit_message(state: Shared<'_>, entry_id: String, text: String) -> Result<(), String> {
-    // Rewinding to an earlier entry means dropping everything after it, then
-    // running the edited text as a fresh turn.
-    let index = entry_id
-        .trim_start_matches('m')
-        .parse::<usize>()
-        .map_err(|_| "that message cannot be edited".to_string())?;
-
+    // Rewind to the turn that produced this message, then run the edited text.
+    // `rewind_to` cuts at a user message so no tool result is orphaned.
     {
         let mut slot = state.session.lock().map_err(error)?;
         let session = slot.as_mut().ok_or("no session is open")?;
-        if index >= session.messages.len() {
-            return Err("that message is no longer in the session".to_string());
-        }
-        session.messages.truncate(index);
+        session.rewind_to(&entry_id).map_err(error)?;
     }
     run_turn(state.inner().clone(), text, Vec::new()).await
 }
 
 #[tauri::command]
 pub async fn retry_message(state: Shared<'_>, entry_id: String) -> Result<(), String> {
-    let index = entry_id
-        .trim_start_matches('m')
-        .parse::<usize>()
-        .map_err(|_| "that message cannot be retried".to_string())?;
-
     let prompt = {
         let mut slot = state.session.lock().map_err(error)?;
         let session = slot.as_mut().ok_or("no session is open")?;
-        // Walk back to the user message that produced this turn.
-        let start = index.min(session.messages.len());
-        let user_index = session.messages[..start]
-            .iter()
-            .rposition(|message| message.role == luna_core::types::Role::User);
-        let Some(user_index) = user_index else {
-            return Err("there is no earlier message to retry".to_string());
-        };
-        let prompt = session.messages[user_index].text();
-        session.messages.truncate(user_index);
-        prompt
+        session.rewind_to(&entry_id).map_err(error)?
     };
     run_turn(state.inner().clone(), prompt, Vec::new()).await
 }

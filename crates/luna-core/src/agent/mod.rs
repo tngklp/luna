@@ -536,9 +536,17 @@ impl AgentSession {
         ) {
             return Ok(());
         }
+        self.compact().await
+    }
 
+    /// Summarise the conversation now, whether or not it is full.
+    ///
+    /// Returns whether anything was compacted. A failed summary leaves the
+    /// conversation untouched rather than losing it.
+    pub async fn compact(&mut self) -> Result<()> {
         let (head, tail) = context::split_for_compaction(&self.messages, 8);
         if head.is_empty() {
+            self.deps.sink.emit(Emitted::notice("info", "nothing to compact yet"));
             return Ok(());
         }
 
@@ -560,6 +568,7 @@ impl AgentSession {
 
         if summary.trim().is_empty() {
             // A failed summary must not lose the conversation.
+            self.deps.sink.emit(Emitted::notice("warning", "could not summarise the conversation"));
             return Ok(());
         }
 
@@ -572,6 +581,30 @@ impl AgentSession {
             "compacted the conversation to stay inside the context window",
         ));
         Ok(())
+    }
+
+    /// Rewind to just before `entry_id`, keeping the conversation valid.
+    ///
+    /// A tool result whose call is dropped would leave the model with an
+    /// orphaned reference, so the cut always lands on a user message.
+    pub fn rewind_to(&mut self, entry_id: &str) -> Result<String> {
+        let index = entry_id
+            .trim_start_matches('m')
+            .parse::<usize>()
+            .map_err(|_| LunaError::other("that message cannot be edited"))?;
+        if index >= self.messages.len() {
+            return Err(LunaError::other("that message is no longer in the session"));
+        }
+
+        // Walk back to the user message that opened this turn.
+        let cut = self.messages[..=index]
+            .iter()
+            .rposition(|message| message.role == Role::User)
+            .ok_or_else(|| LunaError::other("there is no earlier message to rewind to"))?;
+
+        let prompt = self.messages[cut].text();
+        self.messages.truncate(cut);
+        Ok(prompt)
     }
 }
 

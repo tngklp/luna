@@ -14,6 +14,7 @@
 //!   and a subagent that dies reports back instead of hanging its parent.
 
 pub mod board;
+pub mod mailbox;
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -30,6 +31,7 @@ use crate::tool::todo::TaskBoard;
 use crate::types::ThinkingLevel;
 
 pub use board::{Plan, PlannedTask};
+pub use mailbox::{Mailbox, Message};
 
 /// How a subagent ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +97,10 @@ pub struct Orchestrator {
     board: TaskBoard,
     cancel: CancellationToken,
     spawned: AtomicUsize,
+    /// Messages between agents.
+    mailbox: Arc<Mailbox>,
+    /// Cost spent per role, so one role cannot eat the whole budget.
+    role_spend: Arc<Mutex<BTreeMap<String, f64>>>,
 }
 
 impl Orchestrator {
@@ -108,11 +114,40 @@ impl Orchestrator {
             board: TaskBoard::new(),
             cancel: CancellationToken::new(),
             spawned: AtomicUsize::new(0),
+            mailbox: Arc::new(Mailbox::new()),
+            role_spend: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
     pub fn board(&self) -> TaskBoard {
         self.board.clone()
+    }
+
+    pub fn mailbox(&self) -> Arc<Mailbox> {
+        self.mailbox.clone()
+    }
+
+    /// Every agent id in the tree, for a broadcast.
+    pub fn agent_ids(&self) -> Vec<String> {
+        self.nodes.lock().map(|nodes| nodes.keys().cloned().collect()).unwrap_or_default()
+    }
+
+    /// Whether a role has spent its allowance.
+    pub fn role_exhausted(&self, role: &str) -> bool {
+        let Some(limit) = self.config.role(role).max_cost_usd else { return false };
+        if limit <= 0.0 {
+            return false;
+        }
+        self.role_spend
+            .lock()
+            .map(|spend| spend.get(role).copied().unwrap_or(0.0) >= limit)
+            .unwrap_or(false)
+    }
+
+    fn record_role_spend(&self, role: &str, cost: f64) {
+        if let Ok(mut spend) = self.role_spend.lock() {
+            *spend.entry(role.to_string()).or_insert(0.0) += cost;
+        }
     }
 
     pub fn cancel(&self) {
@@ -168,6 +203,11 @@ impl Orchestrator {
         brief: &str,
         cwd: &std::path::Path,
     ) -> Result<AgentReport> {
+        // A role that has spent its allowance cannot start new work.
+        if self.role_exhausted(role) {
+            return Err(LunaError::Budget(format!("the `{role}` role has reached its cost limit")));
+        }
+
         let permit = self
             .semaphore
             .clone()
@@ -225,6 +265,17 @@ impl Orchestrator {
             tool_calls: session.stats.tool_calls,
             cost: session.stats.cost,
         };
+        self.record_role_spend(role, report.cost);
+
+        // Anything the tree sent this agent is handed to the parent, so a
+        // message is never silently dropped when the agent finishes.
+        let unread = self.mailbox.drain(&agent_id);
+        let mut report = report;
+        if !unread.is_empty() {
+            let notes =
+                unread.iter().map(|message| message.render()).collect::<Vec<_>>().join("\n");
+            report.summary = format!("{}\n\nUnread messages:\n{notes}", report.summary);
+        }
 
         if let Ok(mut nodes) = self.nodes.lock() {
             if let Some(node) = nodes.get_mut(&agent_id) {

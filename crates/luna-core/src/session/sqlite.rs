@@ -58,6 +58,18 @@ impl SessionIndex {
                 .map_err(|source| LunaError::Io { path: parent.to_path_buf(), source })?;
         }
         let connection = Connection::open(path)?;
+        // A database written by an older or different tool may already hold a
+        // `sessions` table with another shape. Detect that and start over rather
+        // than failing every query: the index is derived data, and the
+        // transcripts it points at are untouched.
+        if !schema_matches(&connection) {
+            tracing::warn!("rebuilding the session index: the existing schema does not match");
+            connection.execute_batch(
+                "DROP TABLE IF EXISTS sessions;
+                 DROP TABLE IF EXISTS messages_fts;
+                 DROP TABLE IF EXISTS changes;",
+            )?;
+        }
         connection.execute_batch(SCHEMA)?;
         Ok(SessionIndex { connection: Arc::new(Mutex::new(connection)) })
     }
@@ -210,6 +222,27 @@ impl SessionIndex {
             Ok(())
         })
     }
+}
+
+/// Whether an existing `sessions` table has the columns Luna expects.
+///
+/// A missing table counts as a match: `CREATE TABLE IF NOT EXISTS` will make it.
+fn schema_matches(connection: &Connection) -> bool {
+    let mut statement = match connection.prepare("PRAGMA table_info(sessions)") {
+        Ok(statement) => statement,
+        Err(_) => return false,
+    };
+    let columns: Vec<String> = match statement.query_map([], |row| row.get::<_, String>(1)) {
+        Ok(rows) => rows.flatten().collect(),
+        Err(_) => return false,
+    };
+    if columns.is_empty() {
+        return true;
+    }
+    // The columns every query in this module relies on.
+    ["path", "id", "cwd", "modified", "first_message"]
+        .iter()
+        .all(|required| columns.iter().any(|column| column == required))
 }
 
 fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummary> {

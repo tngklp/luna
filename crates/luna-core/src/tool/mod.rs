@@ -6,8 +6,10 @@
 
 pub mod agent;
 pub mod bash;
+pub mod extras;
 pub mod fs;
 pub mod todo;
+pub mod web;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -191,6 +193,13 @@ impl ToolRegistry {
         registry.register(Arc::new(bash::BashTool));
         registry.register(Arc::new(todo::TodoWriteTool::new(board.clone())));
         registry.register(Arc::new(todo::TodoReadTool::new(board)));
+        registry.register(Arc::new(web::WebFetchTool));
+        registry.register(Arc::new(web::WebSearchTool::auto()));
+        registry.register(Arc::new(web::ReadPdfTool));
+        registry.register(Arc::new(extras::ApplyPatchTool));
+        registry.register(Arc::new(extras::GitTool));
+        registry.register(Arc::new(extras::PythonReplTool::new(extras::ReplHandle::new())));
+        registry.register(Arc::new(extras::AskUserTool::new(Arc::new(extras::FirstOption))));
         registry
     }
 

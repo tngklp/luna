@@ -179,11 +179,20 @@ pub struct RoleConfig {
     /// Hard cap on agentic steps before the role must report back.
     #[serde(default)]
     pub max_steps: Option<usize>,
+    /// Cost ceiling for this role across the whole tree. Zero disables it.
+    #[serde(default)]
+    pub max_cost_usd: Option<f64>,
 }
 
 impl Default for RoleConfig {
     fn default() -> Self {
-        RoleConfig { model: None, tools: Vec::new(), system: None, max_steps: Some(40) }
+        RoleConfig {
+            model: None,
+            tools: Vec::new(),
+            system: None,
+            max_steps: Some(40),
+            max_cost_usd: None,
+        }
     }
 }
 
@@ -253,6 +262,12 @@ pub struct Config {
     /// Extra instructions appended to every system prompt.
     #[serde(default)]
     pub instructions: Option<String>,
+    /// MCP servers to connect to.
+    #[serde(default)]
+    pub mcp: Vec<crate::mcp::ServerConfig>,
+    /// Where `web_search` sends its queries.
+    #[serde(default)]
+    pub search_backend: Option<String>,
 }
 
 impl Default for Config {
@@ -306,6 +321,8 @@ impl Default for Config {
             roles,
             approvals: ApprovalConfig::default(),
             instructions: None,
+            mcp: Vec::new(),
+            search_backend: None,
         }
     }
 }

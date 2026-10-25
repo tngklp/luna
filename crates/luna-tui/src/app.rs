@@ -581,9 +581,18 @@ impl App {
                 self.refresh_sessions();
             }
             "/compact" => {
-                self.lines.push(Line::Notice {
-                    level: "info".into(),
-                    text: "compaction runs automatically when the context fills".into(),
+                // Compaction needs the session, which the worker owns during a
+                // turn; queue it so it runs between turns.
+                let session = self.session.clone();
+                let sender = self.event_tx.clone();
+                self.handle.spawn(async move {
+                    let taken = session.lock().unwrap().take();
+                    let Some(mut agent) = taken else { return };
+                    let outcome = agent.compact().await;
+                    if let Err(err) = outcome {
+                        let _ = sender.send(Emitted::notice("error", err.to_string()));
+                    }
+                    *session.lock().unwrap() = Some(agent);
                 });
             }
             "/copy" => {

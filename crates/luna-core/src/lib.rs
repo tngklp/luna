@@ -7,9 +7,12 @@
 
 pub mod agent;
 pub mod catalog;
+pub mod checkpoint;
 pub mod config;
 pub mod error;
 pub mod event;
+pub mod extensions;
+pub mod mcp;
 pub mod orchestrator;
 pub mod presets;
 pub mod provider;
@@ -17,6 +20,7 @@ pub mod session;
 pub mod tokens;
 pub mod tool;
 pub mod types;
+pub mod workflow;
 
 pub use config::{Config, Paths};
 pub use error::{LunaError, Result};

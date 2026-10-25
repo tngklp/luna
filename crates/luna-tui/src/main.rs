@@ -40,6 +40,28 @@ fn main() -> Result<()> {
 
     let model_override = parse_model(&args)?;
 
+    // Headless and diagnostic modes never touch the terminal.
+    if args.iter().any(|arg| arg == "doctor") {
+        let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+        return exit_code(runtime.block_on(luna_tui::headless::doctor()).unwrap_or(1));
+    }
+    if let Some(prompt) = parse_prompt(&args)? {
+        let format = if args.iter().any(|arg| arg == "--json") {
+            luna_tui::headless::OutputFormat::Json
+        } else {
+            luna_tui::headless::OutputFormat::Text
+        };
+        let yes = args.iter().any(|arg| arg == "--yes" || arg == "-y");
+        let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+        let code = runtime.block_on(luna_tui::headless::run_prompt(
+            &prompt,
+            model_override,
+            format,
+            yes,
+        ))?;
+        return exit_code(code);
+    }
+
     let paths = Paths::resolve();
     paths.ensure()?;
 
@@ -93,6 +115,10 @@ USAGE
 
 OPTIONS
     -m, --model <ref>   Model to run, as provider/model (e.g. local/llama3.2)
+    -p, --prompt <text> Run one prompt headlessly and print the answer
+        --json          With --prompt, emit JSON events instead of text
+    -y, --yes           With --prompt, approve every tool without asking
+        doctor          Check the config, providers and extensions
     -h, --help          Show this help
     -V, --version       Print the version
 
@@ -135,6 +161,33 @@ fn parse_model(args: &[String]) -> Result<Option<String>> {
         index += 1;
     }
     Ok(None)
+}
+
+/// Read `-p <prompt>` or `--prompt=<prompt>`.
+fn parse_prompt(args: &[String]) -> Result<Option<String>> {
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "-p" || arg == "--prompt" {
+            let value =
+                args.get(index + 1).ok_or_else(|| anyhow::anyhow!("--prompt needs a value"))?;
+            return Ok(Some(value.clone()));
+        }
+        if let Some(value) = arg.strip_prefix("--prompt=") {
+            return Ok(Some(value.to_string()));
+        }
+        index += 1;
+    }
+    Ok(None)
+}
+
+/// Turn an exit code into the process result.
+fn exit_code(code: i32) -> Result<()> {
+    if code == 0 {
+        Ok(())
+    } else {
+        std::process::exit(code)
+    }
 }
 
 #[cfg(test)]
