@@ -11,6 +11,7 @@ pub mod config;
 pub mod error;
 pub mod event;
 pub mod orchestrator;
+pub mod presets;
 pub mod provider;
 pub mod session;
 pub mod tokens;

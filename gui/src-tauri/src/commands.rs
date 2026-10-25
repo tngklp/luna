@@ -535,6 +535,7 @@ pub fn set_models_config(state: Shared, config: ModelsConfigDto) -> Result<Model
         settings.providers.insert(
             name.clone(),
             ProviderConfig {
+                preset: None,
                 kind,
                 base_url: provider.base_url.clone(),
                 api_key: None,

@@ -46,7 +46,6 @@ export function Sidebar() {
   const setFilter = useLuna((state) => state.setSessionFilter)
   const toggleStar = useLuna((state) => state.toggleStar)
   const openSettings = useLuna((state) => state.openSettings)
-  const openWelcome = useLuna((state) => state.openWelcome)
   const searchFocusSeq = useLuna((state) => state.searchFocusSeq)
 
   const searchRef = useRef<HTMLInputElement | null>(null)
@@ -265,21 +264,6 @@ export function Sidebar() {
       </div>
 
       <div className="sidefoot">
-        <button className="sidefoot__btn" onClick={openWelcome} title="Home" aria-label="Home">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M2.5 6.5 8 2l5.5 4.5V13a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
-            <path d="M6.5 14V9.5h3V14" />
-          </svg>
-        </button>
         <button className="sidefoot__btn grow" onClick={openSettings} title="Settings">
           <span aria-hidden="true">⚙</span>
           <span>Settings</span>

@@ -96,6 +96,7 @@ fn config() -> Config {
     config.providers.insert(
         "scripted".into(),
         ProviderConfig {
+            preset: None,
             kind: ProviderKind::Openai,
             base_url: Some("http://localhost:1".into()),
             api_key: Some("test".into()),

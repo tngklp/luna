@@ -26,6 +26,7 @@ use ratatui::Terminal;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
+use crate::commands::Palette;
 use crate::theme::Theme;
 
 /// A line in the transcript, already flattened for rendering.
@@ -102,6 +103,8 @@ pub struct App {
     pub follow: bool,
     pub mode: Mode,
     pub pending: Option<PendingApproval>,
+    /// The slash-command palette, open while the composer holds a command.
+    pub palette: Option<Palette>,
     pub status: String,
     pub model: String,
     pub thinking: ThinkingLevel,
@@ -114,6 +117,10 @@ pub struct App {
     pub tokens_out: u32,
     pub cost: f64,
     pub context_percent: f32,
+    /// Where the config was read from, shown in the header.
+    pub config_path: String,
+    /// Whether that config is project-local.
+    pub project_config: bool,
 
     providers: Arc<ProviderRegistry>,
     store: SessionStore,
@@ -137,6 +144,8 @@ impl App {
         store: SessionStore,
         _sink: SinkRef,
         handle: Handle,
+        config_path: String,
+        project_config: bool,
     ) -> Result<App> {
         let (event_tx, events) = unbounded_channel();
         let (approval_tx, approvals) = unbounded_channel();
@@ -150,6 +159,8 @@ impl App {
 
         let mut app = App {
             theme: Theme::dark(),
+            // The transcript starts empty: the header already says what this is,
+            // and a greeting would push the first real message down the screen.
             lines: Vec::new(),
             input: String::new(),
             cursor: 0,
@@ -157,6 +168,7 @@ impl App {
             follow: true,
             mode: Mode::Normal,
             pending: None,
+            palette: None,
             status: "ready".to_string(),
             model,
             thinking: ThinkingLevel::Medium,
@@ -169,6 +181,8 @@ impl App {
             tokens_out: 0,
             cost: 0.0,
             context_percent: 0.0,
+            config_path,
+            project_config,
             config,
             providers,
             store,
@@ -185,10 +199,6 @@ impl App {
             last_frame: Instant::now(),
         };
 
-        app.lines.push(Line::Notice {
-            level: "info".into(),
-            text: "Luna — type a message, /help for commands, Ctrl+C to quit".into(),
-        });
         app.start_session()?;
         Ok(app)
     }
@@ -245,6 +255,7 @@ impl App {
                     Event::Paste(text) => {
                         self.input.insert_str(self.cursor, &text);
                         self.cursor += text.len();
+                        self.sync_palette();
                         self.dirty = true;
                     }
                     Event::Resize(_, _) => self.dirty = true,
@@ -265,6 +276,12 @@ impl App {
             return;
         }
 
+        // The palette owns the arrows and Enter while it is open.
+        if self.palette.is_some() && self.palette_key(key) {
+            self.dirty = true;
+            return;
+        }
+
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Char('c') if ctrl => self.should_quit = true,
@@ -280,11 +297,12 @@ impl App {
                 self.dirty = true;
             }
             KeyCode::Esc => {
-                if self.running {
+                if self.palette.is_some() {
+                    self.palette = None;
+                } else if self.running {
                     self.abort();
                 } else {
                     self.show_sessions = false;
-                    self.dirty = true;
                 }
             }
             KeyCode::Enter => {
@@ -292,6 +310,15 @@ impl App {
                     self.insert_char('\n');
                 } else {
                     self.submit();
+                }
+            }
+            KeyCode::Tab => {
+                if let Some(palette) = &self.palette {
+                    if let Some(completion) = palette.completion() {
+                        self.input = completion;
+                        self.cursor = self.input.len();
+                        self.sync_palette();
+                    }
                 }
             }
             KeyCode::Char(ch) => self.insert_char(ch),
@@ -322,9 +349,53 @@ impl App {
         self.dirty = true;
     }
 
+    /// Handle a key while the palette is open. Returns true when it was used.
+    fn palette_key(&mut self, key: KeyEvent) -> bool {
+        let Some(palette) = &mut self.palette else { return false };
+        match key.code {
+            KeyCode::Up => {
+                palette.select_previous();
+                true
+            }
+            KeyCode::Down => {
+                palette.select_next();
+                true
+            }
+            KeyCode::Tab => {
+                if let Some(completion) = palette.completion() {
+                    self.input = completion;
+                    self.cursor = self.input.len();
+                    self.sync_palette();
+                }
+                true
+            }
+            KeyCode::Enter => {
+                // Enter accepts the highlighted command rather than sending it,
+                // so a half-typed command never reaches the agent.
+                if let Some(completion) = palette.completion() {
+                    self.input = completion;
+                    self.cursor = self.input.len();
+                    self.palette = None;
+                    // A command with no argument can run immediately.
+                    if !self.input.ends_with(' ') {
+                        self.submit();
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Recompute the palette from the composer.
+    fn sync_palette(&mut self) {
+        self.palette = Palette::from_input(&self.input);
+    }
+
     fn insert_char(&mut self, ch: char) {
         self.input.insert(self.cursor, ch);
         self.cursor += ch.len_utf8();
+        self.sync_palette();
     }
 
     fn backspace(&mut self) {
@@ -338,6 +409,7 @@ impl App {
         }
         self.input.remove(index);
         self.cursor = index;
+        self.sync_palette();
     }
 
     fn delete_forward(&mut self) {
@@ -345,6 +417,7 @@ impl App {
             return;
         }
         self.input.remove(self.cursor);
+        self.sync_palette();
     }
 
     fn scroll_up(&mut self, amount: usize) {
@@ -391,7 +464,8 @@ impl App {
             self.lines.push(Line::Error(err.to_string()));
         } else {
             self.lines.clear();
-            self.lines.push(Line::Notice { level: "info".into(), text: "new session".into() });
+            self.scroll = 0;
+            self.follow = true;
         }
         self.dirty = true;
     }
@@ -404,6 +478,7 @@ impl App {
         }
         self.input.clear();
         self.cursor = 0;
+        self.palette = None;
 
         if text.starts_with('/') {
             self.run_command(&text);
@@ -451,24 +526,37 @@ impl App {
         match command {
             "/help" => {
                 for line in [
-                    "/help              show this",
-                    "/new               start a new session",
-                    "/model <name>      switch model, e.g. anthropic/claude-sonnet-4-5",
-                    "/thinking <level>  off|minimal|low|medium|high|xhigh|max",
-                    "/sessions          list saved sessions",
-                    "/copy              copy the transcript to the clipboard",
-                    "/quit              exit",
+                    "keys",
+                    "  Enter          send          Shift+Enter  new line",
+                    "  Esc            abort         Ctrl+C       quit",
+                    "  Ctrl+N         new session   Ctrl+S       sessions",
+                    "  Ctrl+L         clear         PgUp/PgDn    scroll",
+                    "",
+                    "commands",
+                    "  /model <ref>   switch model, e.g. /model local/llama3.2",
+                    "  /thinking <l>  off|minimal|low|medium|high|xhigh|max",
+                    "  /new           start a new session",
+                    "  /sessions      browse saved sessions",
+                    "  /compact       summarise the conversation",
+                    "  /copy          copy the transcript",
+                    "  /clear         clear the transcript",
+                    "  /quit          exit",
                 ] {
                     self.lines.push(Line::Notice { level: "info".into(), text: line.into() });
                 }
             }
             "/new" => self.new_session(),
             "/quit" | "/exit" => self.should_quit = true,
+            "/clear" => {
+                self.lines.clear();
+                self.scroll = 0;
+                self.follow = true;
+            }
             "/model" => {
                 if argument.is_empty() {
                     self.lines.push(Line::Notice {
                         level: "info".into(),
-                        text: format!("current model: {}", self.model),
+                        text: format!("model: {}", self.model),
                     });
                 } else {
                     self.model = argument.to_string();
@@ -495,6 +583,12 @@ impl App {
             "/sessions" => {
                 self.show_sessions = true;
                 self.refresh_sessions();
+            }
+            "/compact" => {
+                self.lines.push(Line::Notice {
+                    level: "info".into(),
+                    text: "compaction runs automatically when the context fills".into(),
+                });
             }
             "/copy" => {
                 let text = transcript_text(&self.lines);
@@ -543,10 +637,6 @@ impl App {
 
     fn drain_approvals(&mut self) {
         while let Ok(pending) = self.approvals.try_recv() {
-            self.lines.push(Line::Notice {
-                level: "warning".into(),
-                text: format!("{}: {}", pending.title, pending.detail),
-            });
             self.pending = Some(pending);
             self.mode = Mode::Approval;
             self.dirty = true;
@@ -801,5 +891,10 @@ mod tests {
     fn system_messages_are_not_persisted() {
         assert!(!is_persistable(&Message { role: Role::System, blocks: vec![] }));
         assert!(is_persistable(&Message::user("x")));
+    }
+
+    #[test]
+    fn an_empty_transcript_copies_to_nothing() {
+        assert_eq!(transcript_text(&[]), "");
     }
 }

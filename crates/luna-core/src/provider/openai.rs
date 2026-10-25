@@ -394,6 +394,7 @@ mod tests {
         OpenAiProvider::new(
             "openai",
             &ProviderConfig {
+                preset: None,
                 kind: ProviderKind::Openai,
                 base_url: Some("https://api.openai.com/v1".into()),
                 api_key: Some("test".into()),

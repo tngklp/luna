@@ -11,6 +11,10 @@ description = "Luna terminal user interface"
 name = "luna"
 path = "src/main.rs"
 
+[lib]
+name = "luna_tui"
+path = "src/lib.rs"
+
 [dependencies]
 luna-core = { workspace = true }
 

@@ -157,7 +157,6 @@ interface LunaState {
   themeId: string
   /** Persisted interface preferences. */
   prefs: UiPreferences
-  welcomeOpen: boolean
   /** Which main column view is showing. */
   mainTab: MainTab
   /** Whether the settings dialog is open. */
@@ -184,8 +183,6 @@ interface LunaState {
   openWorkspace: (path: string) => Promise<void>
   setTheme: (id: string) => void
   setPrefs: (patch: Partial<UiPreferences>) => void
-  openWelcome: () => void
-  closeWelcome: () => void
   openSettings: () => void
   closeSettings: () => void
   /** Open a changed file in the operating system's editor. */
@@ -276,7 +273,6 @@ export const useLuna = create<LunaState>()((set, get) => ({
   sessionFilter: 'all',
   themeId: loadThemeId(),
   prefs: loadUiPreferences(),
-  welcomeOpen: true,
   mainTab: 'chat',
   settingsOpen: false,
 
@@ -594,7 +590,6 @@ export const useLuna = create<LunaState>()((set, get) => ({
       await window.luna.switchSession(path)
       await get().refresh()
       await get().loadSessions()
-      set({ welcomeOpen: false })
     } catch (cause) {
       set({ error: describeError(cause) })
     } finally {
@@ -658,8 +653,6 @@ export const useLuna = create<LunaState>()((set, get) => ({
     set({ prefs })
   },
 
-  openWelcome: () => set({ welcomeOpen: true }),
-  closeWelcome: () => set({ welcomeOpen: false }),
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
   openFile: (path) => {

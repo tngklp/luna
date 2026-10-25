@@ -416,6 +416,7 @@ mod tests {
         AnthropicProvider::new(
             "anthropic",
             &ProviderConfig {
+                preset: None,
                 kind: ProviderKind::Anthropic,
                 base_url: None,
                 api_key: Some("test".into()),

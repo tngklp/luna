@@ -63,13 +63,19 @@ cd gui && npm install && npm run tauri:build
 
 ## Configure
 
-Luna writes a commented default config on first run:
+Luna writes `.luna/config.toml` in the working directory on first run, so the
+settings a session used are visible in the repository.
 
-| Platform | Path |
+| Location | When it is used |
 |---|---|
-| Windows | `%APPDATA%\luna\config\config.toml` |
-| Linux | `~/.config/luna/config.toml` |
-| macOS | `~/Library/Application Support/luna/config.toml` |
+| `./.luna/config.toml` | Always, when it exists. Written on first run. |
+| `%APPDATA%\luna\config\config.toml` (Windows) | Fallback when the project has none. |
+| `~/.config/luna/config.toml` (Linux) | Fallback when the project has none. |
+| `~/Library/Application Support/luna/config.toml` (macOS) | Fallback when the project has none. |
+
+A project config wins over the per-user one, so a repo can pin its own model and
+approvals without touching your global settings. Add `.luna/` to `.gitignore` if
+you would rather not commit it.
 
 ```toml
 [general]
@@ -87,26 +93,83 @@ bash = "ask"
 network = "allow"
 
 [providers.anthropic]
-kind = "anthropic"
-api_key_env = "ANTHROPIC_API_KEY"
+preset = "anthropic"
 
 [providers.openai]
-kind = "openai"
-api_key_env = "OPENAI_API_KEY"
+preset = "openai"
 
 [providers.gemini]
-kind = "gemini"
-api_key_env = "GEMINI_API_KEY"
+preset = "gemini"
 
-# Ollama, llama.cpp, vLLM, LM Studio, OpenRouter and any other
-# OpenAI-compatible endpoint.
-[providers.local]
-kind = "openai"
-base_url = "http://localhost:11434/v1"
+[providers.ollama]
+preset = "ollama"
 ```
 
 Keys are read from the environment by default, so nothing secret has to live in
 the file. Set `api_key` instead if you prefer.
+
+### Providers
+
+Every provider below is built in. Enable one by adding a table with its preset:
+
+```toml
+[providers.groq]
+preset = "groq"
+```
+
+| Preset | Provider | Key variable |
+|---|---|---|
+| `anthropic` | Anthropic | `ANTHROPIC_API_KEY` |
+| `openai` | OpenAI | `OPENAI_API_KEY` |
+| `gemini` | Google Gemini | `GEMINI_API_KEY` |
+| `openrouter` | OpenRouter | `OPENROUTER_API_KEY` |
+| `groq` | Groq | `GROQ_API_KEY` |
+| `deepseek` | DeepSeek | `DEEPSEEK_API_KEY` |
+| `mistral` | Mistral | `MISTRAL_API_KEY` |
+| `xai` | xAI | `XAI_API_KEY` |
+| `together` | Together AI | `TOGETHER_API_KEY` |
+| `fireworks` | Fireworks AI | `FIREWORKS_API_KEY` |
+| `cerebras` | Cerebras | `CEREBRAS_API_KEY` |
+| `perplexity` | Perplexity | `PERPLEXITY_API_KEY` |
+| `zai` | Z.ai (GLM) | `ZAI_API_KEY` |
+| `moonshot` | Moonshot (Kimi) | `MOONSHOT_API_KEY` |
+| `ollama` | Ollama (local) | — |
+| `llamacpp` | llama.cpp (local) | — |
+| `lmstudio` | LM Studio (local) | — |
+| `vllm` | vLLM (local) | — |
+
+A preset only fills in defaults. Anything you set explicitly wins, so this points
+Groq's key and models at a proxy:
+
+```toml
+[providers.groq]
+preset = "groq"
+base_url = "https://proxy.internal/v1"
+```
+
+### Custom providers
+
+Anything that speaks the OpenAI Chat Completions dialect works without a preset —
+just give it a name, a URL and a key variable:
+
+```toml
+[providers.my-gateway]
+kind = "openai"                       # or "anthropic" / "gemini"
+base_url = "https://gateway.internal/v1"
+api_key_env = "GATEWAY_KEY"
+models = ["house-model"]
+discover_models = false               # true asks the endpoint for its model list
+headers = { "X-Team" = "luna" }       # extra request headers
+```
+
+Then select it like any other provider:
+
+```sh
+luna --model my-gateway/house-model
+```
+
+`kind` picks the wire protocol, not the vendor: an Anthropic-compatible gateway
+uses `kind = "anthropic"`, and everything else uses `kind = "openai"`.
 
 ### Roles
 
@@ -133,20 +196,37 @@ luna
 |---|---|
 | `Enter` | Send |
 | `Shift+Enter` | New line |
-| `Esc` | Abort the running turn |
+| `Esc` | Abort the running turn, or close the palette |
 | `Ctrl+C` | Quit |
 | `Ctrl+N` | New session |
 | `Ctrl+S` | Toggle the session list |
 | `Ctrl+L` | Clear the transcript |
+| `PgUp` / `PgDn` | Scroll |
 | `y` / `a` / `n` | Answer an approval prompt |
 
-Commands: `/help`, `/new`, `/model`, `/thinking`, `/sessions`, `/copy`, `/quit`.
+Typing `/` opens the command palette: a filtered list with descriptions, driven
+by the arrow keys, `Tab` to complete and `Enter` to run.
+
+| Command | Purpose |
+|---|---|
+| `/help` | Keys and commands |
+| `/new` | Start a new session |
+| `/model <ref>` | Switch model, e.g. `/model local/llama3.2` |
+| `/thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+| `/sessions` | Browse saved sessions |
+| `/compact` | Summarise the conversation |
+| `/copy` | Copy the transcript |
+| `/clear` | Clear the transcript |
+| `/quit` | Exit |
+
+The header shows the model and where the config came from; the status bar shows
+the run state, thinking level, context usage, tokens and cost.
 
 ### Desktop
 
 The GUI is the chat surface from [PiUI](https://github.com/tngklp/piui), ported
-to Tauri. `Ctrl+N` starts a session, `Ctrl+K` searches, and the composer switches
-to steering while a turn is running.
+to Tauri. It opens straight into the chat. `Ctrl+N` starts a session, `Ctrl+K`
+searches, and the composer switches to steering while a turn is running.
 
 ## How it works
 

@@ -4,11 +4,6 @@
 //! only the widgets and the input mode. Everything it shows arrives as an
 //! [`AgentEvent`], which is what keeps it in lockstep with the GUI.
 
-mod app;
-mod highlight;
-mod theme;
-mod ui;
-
 use std::io::Write;
 use std::sync::Arc;
 
@@ -25,7 +20,7 @@ use luna_core::session::SessionStore;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use app::App;
+use luna_tui::app::App;
 
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -60,6 +55,8 @@ fn main() -> Result<()> {
     if let Some(model) = model_override {
         config.general.default_model = model;
     }
+    let config_path = paths.config_file().display().to_string();
+    let project_config = paths.uses_project_config();
     let store = SessionStore::open(&paths.data_dir)?;
     let providers = Arc::new(ProviderRegistry::new(&config));
 
@@ -68,7 +65,15 @@ fn main() -> Result<()> {
 
     let sink: SinkRef = Arc::new(luna_core::event::NullSink);
 
-    let mut app = App::new(config, providers, store, sink, runtime.handle().clone())?;
+    let mut app = App::new(
+        config,
+        providers,
+        store,
+        sink,
+        runtime.handle().clone(),
+        config_path,
+        project_config,
+    )?;
 
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();

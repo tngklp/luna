@@ -388,6 +388,7 @@ mod tests {
         GeminiProvider::new(
             "gemini",
             &ProviderConfig {
+                preset: None,
                 kind: ProviderKind::Gemini,
                 base_url: None,
                 api_key: Some("test".into()),
