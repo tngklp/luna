@@ -1,35 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionSummaryDto } from '@shared/ipc'
 import { useLuna } from '../store'
-
-type Bucket = 'Today' | 'Yesterday' | 'Previous 7 days' | 'Older'
-
-function startOfToday(): number {
-  const now = new Date()
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-}
-
-function bucketOf(iso: string): Bucket {
-  const then = new Date(iso).getTime()
-  const today = startOfToday()
-  if (then >= today) return 'Today'
-  if (then >= today - 86_400_000) return 'Yesterday'
-  if (then >= today - 7 * 86_400_000) return 'Previous 7 days'
-  return 'Older'
-}
-
-/** A short, human timestamp: the time today, the date before that. */
-function stamp(iso: string): string {
-  const then = new Date(iso)
-  const minutes = Math.floor((Date.now() - then.getTime()) / 60_000)
-  if (minutes < 1) return 'now'
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}d`
-  return then.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
+import { ContextMenu, type MenuItem } from './ContextMenu'
 
 /** The title a session shows: its name, else its first message. */
 function titleOf(session: SessionSummaryDto): string {
@@ -40,13 +12,22 @@ function titleOf(session: SessionSummaryDto): string {
   return trimmed.length > 80 ? `${trimmed.slice(0, 80).trimEnd()}…` : trimmed
 }
 
+/** Where a menu was asked for, in viewport coordinates. */
+interface MenuAnchor {
+  x: number
+  y: number
+  session: SessionSummaryDto
+}
+
 /**
  * The session sidebar.
  *
  * Laid out like the harnesses people already use: a brand row, one prominent
- * "New session" action, a search field, then the history grouped by recency.
- * The working directory is deliberately absent — it belongs in Settings, not in
- * the place you look to pick up work.
+ * "New session" action, a search field, then a flat history list. The working
+ * directory is deliberately absent — it belongs in Settings, not in the place
+ * you look to pick up work. Rows carry no timestamps and the list has no date
+ * buckets: the order is already newest-first, and a label that says "Yesterday"
+ * is one more thing to read before finding the session you want.
  */
 export function Sidebar() {
   const sessions = useLuna((state) => state.sessions)
@@ -78,25 +59,10 @@ export function Sidebar() {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [pendingDelete, setPendingDelete] = useState<SessionSummaryDto | null>(null)
-  const [menuFor, setMenuFor] = useState<string | null>(null)
+  const [menu, setMenu] = useState<MenuAnchor | null>(null)
 
   const activePath = status?.sessionFile ?? null
   const running = Boolean(status?.isStreaming)
-
-  // Close the row menu on an outside click or Escape.
-  useEffect(() => {
-    if (!menuFor) return
-    const onPointerDown = (): void => setMenuFor(null)
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setMenuFor(null)
-    }
-    window.addEventListener('pointerdown', onPointerDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [menuFor])
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -109,19 +75,12 @@ export function Sidebar() {
     })
   }, [sessions, query, filter, starred, activePath, running])
 
-  const pinned = visible.filter((session) => starred.includes(session.path))
-  const rest = visible.filter((session) => !starred.includes(session.path))
-  const grouped = filter !== 'running'
-  const groups = (
-    [
-      'Today',
-      'Yesterday',
-      'Previous 7 days',
-      'Older'
-    ] as Bucket[]
-  )
-    .map((label) => ({ label, items: rest.filter((session) => bucketOf(session.modified) === label) }))
-    .filter((group) => group.items.length > 0)
+  // Starred sessions float to the top; everything else keeps the store's order.
+  const ordered = useMemo(() => {
+    const pinned = visible.filter((session) => starred.includes(session.path))
+    const rest = visible.filter((session) => !starred.includes(session.path))
+    return [...pinned, ...rest]
+  }, [visible, starred])
 
   const commitRename = async (): Promise<void> => {
     const name = draft.trim()
@@ -129,12 +88,41 @@ export function Sidebar() {
     if (name.length > 0) await renameSession(name)
   }
 
+  const beginRename = (session: SessionSummaryDto): void => {
+    setEditing(session.path)
+    setDraft(session.name ?? '')
+  }
+
+  /** The actions a session offers, wherever the menu was opened from. */
+  const itemsFor = (session: SessionSummaryDto): MenuItem[] => {
+    const isStarred = starred.includes(session.path)
+    const isActive = session.path === activePath
+    return [
+      { label: 'Open', onSelect: () => void switchSession(session.path), disabled: isActive },
+      { label: isStarred ? 'Unstar' : 'Star', onSelect: () => toggleStar(session.path) },
+      { label: 'Rename', onSelect: () => beginRename(session) },
+      {
+        label: 'Duplicate',
+        onSelect: () => {
+          // Duplicating acts on the open session, so open this one first.
+          if (isActive) void forkSession()
+          else void switchSession(session.path).then(() => forkSession())
+        }
+      },
+      {
+        label: 'Delete',
+        danger: true,
+        separated: true,
+        onSelect: () => setPendingDelete(session)
+      }
+    ]
+  }
+
   const renderSession = (session: SessionSummaryDto) => {
     const active = session.path === activePath
     const isRunning = active && running
     const isStarred = starred.includes(session.path)
     const isFork = Boolean(session.parentSessionPath)
-    const menuOpen = menuFor === session.path
 
     return (
       <div
@@ -147,6 +135,10 @@ export function Sidebar() {
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') void switchSession(session.path)
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          setMenu({ x: event.clientX, y: event.clientY, session })
         }}
       >
         {editing === session.path ? (
@@ -168,14 +160,20 @@ export function Sidebar() {
           <>
             <span className="srow__body">
               <span className="srow__title">{titleOf(session)}</span>
-              <span className="srow__meta">
-                {isRunning ? <i className="srow__dot" aria-label="Running" /> : null}
-                {isFork ? <span className="srow__tag">fork</span> : null}
-                <span>{stamp(session.modified)}</span>
-              </span>
+              {isRunning || isFork ? (
+                <span className="srow__meta">
+                  {isRunning ? <i className="srow__dot" aria-label="Running" /> : null}
+                  {isRunning ? <span>Running</span> : null}
+                  {isFork ? <span className="srow__tag">fork</span> : null}
+                </span>
+              ) : null}
             </span>
 
-            {isStarred ? <span className="srow__star" aria-hidden="true">★</span> : null}
+            {isStarred ? (
+              <span className="srow__star" aria-hidden="true">
+                ★
+              </span>
+            ) : null}
 
             <button
               className="srow__more"
@@ -183,50 +181,16 @@ export function Sidebar() {
               title="Session actions"
               onClick={(event) => {
                 event.stopPropagation()
-                setMenuFor(menuOpen ? null : session.path)
+                const box = event.currentTarget.getBoundingClientRect()
+                setMenu((open) =>
+                  open?.session.path === session.path
+                    ? null
+                    : { x: box.right, y: box.bottom + 4, session }
+                )
               }}
             >
               ⋯
             </button>
-
-            {menuOpen ? (
-              <div className="smenu" onClick={(event) => event.stopPropagation()}>
-                <button
-                  onClick={() => {
-                    setMenuFor(null)
-                    toggleStar(session.path)
-                  }}
-                >
-                  {isStarred ? 'Unstar' : 'Star'}
-                </button>
-                <button
-                  onClick={() => {
-                    setMenuFor(null)
-                    setEditing(session.path)
-                    setDraft(session.name ?? '')
-                  }}
-                >
-                  Rename
-                </button>
-                <button
-                  onClick={() => {
-                    setMenuFor(null)
-                    void forkSession()
-                  }}
-                >
-                  Duplicate
-                </button>
-                <button
-                  className="bad"
-                  onClick={() => {
-                    setMenuFor(null)
-                    setPendingDelete(session)
-                  }}
-                >
-                  Delete
-                </button>
-              </div>
-            ) : null}
           </>
         )}
       </div>
@@ -272,21 +236,7 @@ export function Sidebar() {
       </div>
 
       <div className="side__list">
-        {grouped && pinned.length > 0 ? (
-          <div className="sgroup">
-            <div className="sgroup__label">Starred</div>
-            {pinned.map(renderSession)}
-          </div>
-        ) : null}
-
-        {grouped
-          ? groups.map((group) => (
-              <div className="sgroup" key={group.label}>
-                <div className="sgroup__label">{group.label}</div>
-                {group.items.map(renderSession)}
-              </div>
-            ))
-          : visible.map(renderSession)}
+        {ordered.map(renderSession)}
 
         {visible.length === 0 ? (
           <p className="side__empty">
@@ -301,6 +251,15 @@ export function Sidebar() {
           <span>Settings</span>
         </button>
       </div>
+
+      {menu ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={itemsFor(menu.session)}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
 
       {pendingDelete ? (
         <div className="modal" role="dialog" aria-modal="true">

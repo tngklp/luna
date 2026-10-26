@@ -29,6 +29,8 @@ export interface ThemeTokens {
   onAccent: string
   /** Integrated terminal background. */
   term: string
+  /** Text drawn on `term`, which stays dark in every theme. */
+  termText: string
   add: string
   addBg: string
   del: string
@@ -83,6 +85,7 @@ const CSS_VARIABLES: Record<keyof ThemeTokens, string> = {
   accentSoft: '--lilac-soft',
   onAccent: '--on-lilac',
   term: '--term',
+  termText: '--term-text',
   add: '--add',
   addBg: '--add-bg',
   del: '--del',
@@ -91,10 +94,18 @@ const CSS_VARIABLES: Record<keyof ThemeTokens, string> = {
 }
 
 /**
+ * The integrated terminal and code blocks keep a dark surface in every theme,
+ * light ones included, so their text is a fixed light colour rather than a
+ * palette token. It is spread into both signal sets for that reason.
+ */
+const TERM_TEXT = '#e6e0f3'
+
+/**
  * Diff colours and changed-file markers. They read the same on every dark
  * surface and every light surface, so they sit outside the families.
  */
 const DARK_SIGNALS = {
+  termText: TERM_TEXT,
   add: '#6FD6A2',
   addBg: '#16281f',
   del: '#F08AA3',
@@ -103,6 +114,7 @@ const DARK_SIGNALS = {
 }
 
 const LIGHT_SIGNALS = {
+  termText: TERM_TEXT,
   add: '#1F8A5B',
   addBg: '#E1F4EA',
   del: '#C23A5A',

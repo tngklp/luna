@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { useLuna } from '../store'
 import '@xterm/xterm/css/xterm.css'
 
 /**
@@ -20,11 +21,48 @@ interface TerminalPanelProps {
   onResize?: (cols: number, rows: number) => void
 }
 
+/** Read a palette token off the document root. */
+function token(name: string, fallback: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return value.length > 0 ? value : fallback
+}
+
+/**
+ * xterm's palette, taken from the active theme.
+ *
+ * The terminal keeps a dark surface in every theme, so the ANSI colours are
+ * fixed and only the background, cursor, and selection follow the palette.
+ */
+function terminalTheme(): Record<string, string> {
+  return {
+    background: token('--term', '#16141c'),
+    foreground: token('--term-text', '#e2e1e6'),
+    cursor: token('--lilac-strong', '#c08ae0'),
+    selectionBackground: token('--lilac-soft', '#242c4a'),
+    black: token('--term', '#16141c'),
+    red: '#e88a7a',
+    green: '#7dd6a8',
+    yellow: '#e0d07a',
+    blue: '#8aa8e0',
+    magenta: '#c08ae0',
+    cyan: '#7dd6d6',
+    white: token('--term-text', '#e2e1e6')
+  }
+}
+
 export function TerminalPanel({ onReady, onInput, onResize }: TerminalPanelProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const themeId = useLuna((state) => state.themeId)
+
+  // Repaint the terminal when the palette changes. The instance outlives the
+  // theme, so this updates its options rather than rebuilding it.
+  useEffect(() => {
+    const term = termRef.current
+    if (term) term.options.theme = terminalTheme()
+  }, [themeId])
 
   useEffect(() => {
     const host = hostRef.current
@@ -37,20 +75,7 @@ export function TerminalPanel({ onReady, onInput, onResize }: TerminalPanelProps
       cursorBlink: true,
       convertEol: true,
       scrollback: 5000,
-      theme: {
-        background: '#16141c',
-        foreground: '#e2e1e6',
-        cursor: '#c08ae0',
-        selectionBackground: '#242c4a',
-        black: '#16141c',
-        red: '#e88a7a',
-        green: '#7dd6a8',
-        yellow: '#e0d07a',
-        blue: '#8aa8e0',
-        magenta: '#c08ae0',
-        cyan: '#7dd6d6',
-        white: '#e2e1e6'
-      }
+      theme: terminalTheme()
     })
     const fit = new FitAddon()
     term.loadAddon(fit)

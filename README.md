@@ -218,6 +218,7 @@ by the arrow keys, `Tab` to complete and `Enter` to run.
 | `/new` | Start a new session |
 | `/model <ref>` | Switch model, e.g. `/model local/llama3.2` |
 | `/thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+| `/theme <name>` | Switch palette; no argument lists them |
 | `/sessions` | Browse saved sessions |
 | `/attach <path>` | Attach an image to the next message |
 | `/detach` | Remove every attachment |
@@ -252,6 +253,27 @@ luna doctor                            # check config, providers, extensions
 ```
 
 `--resume [path]` reopens a session, and `--theme <name>` picks a palette.
+`/theme` switches it mid-session and `/theme` with no argument lists them.
+
+### Themes
+
+Both interfaces ship the same fifteen palettes: five families, each in a normal,
+dark, and light variant. A family's normal variant is its own coloured surface,
+dark is the same accent on a near-black surface, and light is the light surface
+with the accent darkened enough to read on white.
+
+| Family | Normal | Dark | Light |
+|---|---|---|---|
+| Graphite | neutral grey | near-black | light grey |
+| Wisteria | purple | near-black, purple accent | light, purple accent |
+| Ocean | blue | near-black, blue accent | light, blue accent |
+| Ember | orange | near-black, orange accent | light, orange accent |
+| Rose | pink | near-black, pink accent | light, pink accent |
+
+The GUI's grid in **Settings → Customization** is the source of truth; the TUI
+table in `crates/luna-tui/src/theme.rs` mirrors it, and a test fails if a family
+is missing from either side. A theme file dropped into `~/.luna/themes/<name>.json`
+overrides any built-in by name, in both interfaces.
 
 ### Desktop
 

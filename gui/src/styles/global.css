@@ -276,20 +276,6 @@ kbd {
   margin: 0;
 }
 
-/* A date bucket: a quiet label, then its rows. */
-.sgroup {
-  margin-bottom: 10px;
-}
-
-.sgroup__label {
-  padding: 6px 10px 4px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--dim);
-}
-
 /* One session row. */
 .srow {
   position: relative;
@@ -399,36 +385,60 @@ kbd {
   outline: none;
 }
 
-/* Row actions, anchored under the button that opened them. */
-.smenu {
-  position: absolute;
-  top: calc(100% - 2px);
-  right: 6px;
-  z-index: 20;
-  min-width: 132px;
+/* Row actions. Rendered into the body by `ContextMenu`, so it is positioned
+   against the viewport and never clipped by the scrolling list. */
+.ctxmenu {
+  position: fixed;
+  z-index: 60;
+  min-width: 148px;
   padding: 4px;
-  border-radius: 9px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--raise);
-  box-shadow: 0 10px 26px rgb(0 0 0 / 45%);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 45%);
   display: flex;
   flex-direction: column;
+  animation: ctxin 0.1s ease-out;
 }
 
-.smenu button {
-  padding: 6px 9px;
+@keyframes ctxin {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+.ctxmenu__item {
+  padding: 6px 10px;
   border-radius: 6px;
   text-align: left;
   font-size: 12.5px;
   color: var(--text);
+  white-space: nowrap;
 }
 
-.smenu button:hover {
-  background: var(--bg);
+.ctxmenu__item:hover:not(:disabled) {
+  background: var(--lilac-soft);
 }
 
-.smenu button.bad {
+.ctxmenu__item:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+
+.ctxmenu__item.bad {
   color: var(--del);
+}
+
+.ctxmenu__item.bad:hover {
+  background: var(--del-bg);
+}
+
+.ctxmenu__item.sep {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  border-radius: 0 0 6px 6px;
 }
 
 .side__foot {
@@ -778,7 +788,7 @@ button.hd:hover {
   padding: 12px;
   overflow: auto;
   max-height: 420px;
-  color: #e6e0f3;
+  color: var(--term-text);
 }
 
 .codeblock pre code {

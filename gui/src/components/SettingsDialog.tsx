@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useLuna, type SettingsTab } from '../store'
 import { CustomizationSettings } from './settings/CustomizationSettings'
 import { ExtensionsSettings } from './settings/ExtensionsSettings'
@@ -22,6 +23,16 @@ export function SettingsDialog() {
   const close = useLuna((state) => state.closeSettings)
   const tab = useLuna((state) => state.settingsTab)
   const setTab = useLuna((state) => state.setSettingsTab)
+
+  // Escape closes the dialog, the way every other overlay in the app behaves.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') close()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, close])
 
   if (!open) return null
 

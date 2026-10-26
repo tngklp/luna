@@ -18,7 +18,7 @@ import type {
   UpdateStateDto,
   WorkspaceDto
 } from '@shared/ipc'
-import { loadThemeId, saveThemeId } from './theme/preference'
+import { applyStoredTheme, loadThemeId, saveThemeId } from './theme/preference'
 import { loadUiPreferences, saveUiPreferences, type UiPreferences } from './lib/ui-prefs'
 
 /**
@@ -678,6 +678,9 @@ export const useLuna = create<LunaState>()((set, get) => ({
 
   setTheme: (id) => {
     saveThemeId(id)
+    // Writing the preference is not enough: the palette lives in CSS custom
+    // properties, so the document has to be repainted for the choice to show.
+    applyStoredTheme(id)
     set({ themeId: id })
   },
 

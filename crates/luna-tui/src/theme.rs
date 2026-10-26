@@ -61,6 +61,281 @@ pub struct ThemeFile {
     pub colors: std::collections::BTreeMap<String, String>,
 }
 
+/// One palette, in the GUI's token vocabulary.
+///
+/// `gui/src/theme/themes.ts` is the source of truth: the same five families,
+/// each in normal, dark, and light. Keeping the table in that shape means a
+/// colour added there has an obvious home here. The GUI's `term` and `onAccent`
+/// tokens are absent because the TUI has no terminal pane and no accent-filled
+/// buttons to draw them on.
+struct Palette {
+    id: &'static str,
+    bg: u32,
+    panel: u32,
+    raise: u32,
+    line: u32,
+    text: u32,
+    dim: u32,
+    accent: u32,
+    accent_strong: u32,
+    light: bool,
+}
+
+/// Mix two `0xrrggbb` colours, `weight` being how much of `a` survives.
+fn mix(a: u32, b: u32, weight: f32) -> u32 {
+    let channel = |shift: u32| {
+        let left = ((a >> shift) & 0xff) as f32;
+        let right = ((b >> shift) & 0xff) as f32;
+        (left * weight + right * (1.0 - weight)).round() as u32
+    };
+    (channel(16) << 16) | (channel(8) << 8) | channel(0)
+}
+
+fn rgb(value: u32) -> Color {
+    Color::Rgb((value >> 16) as u8, (value >> 8) as u8, value as u8)
+}
+
+impl Palette {
+    /// Derive every colour the interface draws from the palette's surfaces.
+    ///
+    /// The derivations are the same relationships the hand-written palettes
+    /// used: borders lean towards the accent, muted text sits halfway between
+    /// body text and dim text, and a selected row is the accent laid thinly over
+    /// the background.
+    fn build(&self) -> Theme {
+        let (add, add_bg, del, del_bg, warn) = if self.light {
+            (0x1f8a5b, 0xe1f4ea, 0xc23a5a, 0xfbe4ea, 0xb7791f)
+        } else {
+            (0x6fd6a2, 0x16281f, 0xf08aa3, 0x34202a, 0xe2c08d)
+        };
+        let muted = mix(self.text, self.dim, 0.5);
+        let selected = mix(self.accent, self.bg, 0.22);
+        Theme {
+            bg: rgb(self.bg),
+            panel: rgb(self.panel),
+            raise: rgb(self.raise),
+            line: rgb(self.line),
+            border: rgb(mix(self.line, self.accent, 0.45)),
+            border_accent: rgb(self.accent_strong),
+
+            text: rgb(self.text),
+            muted: rgb(muted),
+            dim: rgb(self.dim),
+
+            accent: rgb(self.accent),
+            selected_bg: rgb(selected),
+
+            success: rgb(add),
+            warning: rgb(warn),
+            error: rgb(del),
+
+            user_text: rgb(self.text),
+            user_bg: rgb(selected),
+            thinking_text: rgb(self.dim),
+
+            tool_pending_bg: rgb(self.raise),
+            tool_success_bg: rgb(add_bg),
+            tool_error_bg: rgb(del_bg),
+            tool_title: rgb(self.text),
+            tool_output: rgb(muted),
+
+            md_heading: rgb(warn),
+            md_code: rgb(self.accent),
+            md_code_block: rgb(add),
+            md_code_border: rgb(self.dim),
+            md_bullet: rgb(self.accent),
+            md_link: rgb(self.accent_strong),
+
+            diff_added: rgb(add),
+            diff_removed: rgb(del),
+        }
+    }
+}
+
+/// The named palettes, three per family and in that order.
+const PALETTES: &[Palette] = &[
+    Palette {
+        id: "graphite",
+        bg: 0x191c21,
+        panel: 0x20242b,
+        raise: 0x2b313a,
+        line: 0x39404b,
+        text: 0xedeff3,
+        dim: 0xa2a8b2,
+        accent: 0xa9b1c0,
+        accent_strong: 0xd2d9e5,
+        light: false,
+    },
+    Palette {
+        id: "graphite-dark",
+        bg: 0x0a0a0c,
+        panel: 0x0f0f12,
+        raise: 0x17171b,
+        line: 0x202026,
+        text: 0xe6e6ea,
+        dim: 0x8a8a94,
+        accent: 0xa9b1c0,
+        accent_strong: 0xc3cbda,
+        light: false,
+    },
+    Palette {
+        id: "graphite-light",
+        bg: 0xf6f6f7,
+        panel: 0xffffff,
+        raise: 0xededef,
+        line: 0xe0e0e3,
+        text: 0x232327,
+        dim: 0x6b6b74,
+        accent: 0x9aa0ae,
+        accent_strong: 0x4c5361,
+        light: true,
+    },
+    Palette {
+        id: "wisteria",
+        bg: 0x181322,
+        panel: 0x1f1830,
+        raise: 0x2b2240,
+        line: 0x3a2e55,
+        text: 0xede9f5,
+        dim: 0xa79fbc,
+        accent: 0xbea4f0,
+        accent_strong: 0xc9b2f5,
+        light: false,
+    },
+    Palette {
+        id: "wisteria-dark",
+        bg: 0x0a0a0c,
+        panel: 0x0f0f12,
+        raise: 0x17171b,
+        line: 0x202026,
+        text: 0xe6e6ea,
+        dim: 0x8a8a94,
+        accent: 0xbea4f0,
+        accent_strong: 0xc9b2f5,
+        light: false,
+    },
+    Palette {
+        id: "wisteria-light",
+        bg: 0xf6f3fb,
+        panel: 0xffffff,
+        raise: 0xeee9f8,
+        line: 0xe0d9ef,
+        text: 0x26203a,
+        dim: 0x6f6788,
+        accent: 0xc3a9f3,
+        accent_strong: 0x7c55cc,
+        light: true,
+    },
+    Palette {
+        id: "ocean",
+        bg: 0x0d1a2e,
+        panel: 0x122340,
+        raise: 0x1a3055,
+        line: 0x234070,
+        text: 0xe3edfa,
+        dim: 0x95aecf,
+        accent: 0x4f9cf0,
+        accent_strong: 0x8cbeff,
+        light: false,
+    },
+    Palette {
+        id: "ocean-dark",
+        bg: 0x0a0a0c,
+        panel: 0x0f0f12,
+        raise: 0x17171b,
+        line: 0x202026,
+        text: 0xe6e6ea,
+        dim: 0x8a8a94,
+        accent: 0x4f9cf0,
+        accent_strong: 0x7db6f7,
+        light: false,
+    },
+    Palette {
+        id: "ocean-light",
+        bg: 0xeff4fb,
+        panel: 0xffffff,
+        raise: 0xe1ebf8,
+        line: 0xd2e0f1,
+        text: 0x14243b,
+        dim: 0x5c7089,
+        accent: 0x3f86d8,
+        accent_strong: 0x1f63b5,
+        light: true,
+    },
+    Palette {
+        id: "ember",
+        bg: 0x1d1209,
+        panel: 0x26180c,
+        raise: 0x362310,
+        line: 0x4a3016,
+        text: 0xf5eadf,
+        dim: 0xbe9f82,
+        accent: 0xf08a3c,
+        accent_strong: 0xffb067,
+        light: false,
+    },
+    Palette {
+        id: "ember-dark",
+        bg: 0x0a0a0c,
+        panel: 0x0f0f12,
+        raise: 0x17171b,
+        line: 0x202026,
+        text: 0xe6e6ea,
+        dim: 0x8a8a94,
+        accent: 0xf08a3c,
+        accent_strong: 0xffa257,
+        light: false,
+    },
+    Palette {
+        id: "ember-light",
+        bg: 0xfdf6f0,
+        panel: 0xffffff,
+        raise: 0xf8ece1,
+        line: 0xecdccd,
+        text: 0x33231a,
+        dim: 0x7d6754,
+        accent: 0xe07a2c,
+        accent_strong: 0xb85c14,
+        light: true,
+    },
+    Palette {
+        id: "rose",
+        bg: 0x1e0f18,
+        panel: 0x28141f,
+        raise: 0x3a1d2c,
+        line: 0x4f2839,
+        text: 0xf7e8f0,
+        dim: 0xc79eb1,
+        accent: 0xf072a8,
+        accent_strong: 0xff92bd,
+        light: false,
+    },
+    Palette {
+        id: "rose-dark",
+        bg: 0x0a0a0c,
+        panel: 0x0f0f12,
+        raise: 0x17171b,
+        line: 0x202026,
+        text: 0xe6e6ea,
+        dim: 0x8a8a94,
+        accent: 0xf072a8,
+        accent_strong: 0xff92bd,
+        light: false,
+    },
+    Palette {
+        id: "rose-light",
+        bg: 0xfdf2f6,
+        panel: 0xffffff,
+        raise: 0xf8e6ee,
+        line: 0xeed3e0,
+        text: 0x331c28,
+        dim: 0x7d5f6d,
+        accent: 0xdd5c93,
+        accent_strong: 0xb13a72,
+        light: true,
+    },
+];
+
 impl Theme {
     /// The default dark palette.
     pub fn dark() -> Theme {
@@ -151,10 +426,11 @@ impl Theme {
     /// Look a built-in up by name.
     pub fn by_name(name: &str) -> Option<Theme> {
         match name {
-            "dark" | "luna-dark" => Some(Theme::dark()),
-            "light" | "luna-light" => Some(Theme::light()),
-            _ => None,
+            "dark" | "luna-dark" => return Some(Theme::dark()),
+            "light" | "luna-light" => return Some(Theme::light()),
+            _ => {}
         }
+        PALETTES.iter().find(|palette| palette.id == name).map(|palette| palette.build())
     }
 
     /// Overlay a theme file's colours onto this palette.
@@ -223,6 +499,7 @@ impl Theme {
     /// Every theme available, built-in and on disk.
     pub fn available(dir: &Path) -> Vec<String> {
         let mut names = vec!["dark".to_string(), "light".to_string()];
+        names.extend(PALETTES.iter().map(|palette| palette.id.to_string()));
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -283,6 +560,58 @@ mod tests {
         assert!(Theme::by_name("dark").is_some());
         assert!(Theme::by_name("light").is_some());
         assert!(Theme::by_name("nope").is_none());
+    }
+
+    #[test]
+    fn every_gui_palette_exists_here_too() {
+        // The GUI's grid is the source of truth; a family missing here would
+        // make `--theme` reject a name the settings menu offers.
+        for id in [
+            "graphite",
+            "graphite-dark",
+            "graphite-light",
+            "wisteria",
+            "wisteria-dark",
+            "wisteria-light",
+            "ocean",
+            "ocean-dark",
+            "ocean-light",
+            "ember",
+            "ember-dark",
+            "ember-light",
+            "rose",
+            "rose-dark",
+            "rose-light",
+        ] {
+            assert!(Theme::by_name(id).is_some(), "{id} is missing");
+        }
+    }
+
+    #[test]
+    fn a_family_variant_keeps_the_family_accent() {
+        let normal = Theme::by_name("wisteria").unwrap();
+        let dark = Theme::by_name("wisteria-dark").unwrap();
+        let light = Theme::by_name("wisteria-light").unwrap();
+        assert_eq!(normal.accent, dark.accent);
+        // The light variant darkens its accent so it reads on white.
+        assert_ne!(normal.accent, light.accent);
+        // Dark is the general near-black surface, so it is darker than normal.
+        assert_ne!(normal.bg, dark.bg);
+    }
+
+    #[test]
+    fn a_light_palette_has_light_surfaces() {
+        let light = Theme::by_name("wisteria-light").unwrap();
+        let Color::Rgb(r, _, _) = light.bg else { panic!("expected rgb") };
+        assert!(r > 200, "a light theme should have a light background");
+    }
+
+    #[test]
+    fn available_lists_every_palette() {
+        let names = Theme::available(Path::new("/nonexistent"));
+        for id in ["wisteria", "wisteria-dark", "wisteria-light", "rose-light"] {
+            assert!(names.contains(&id.to_string()), "{id} is missing");
+        }
     }
 
     #[test]

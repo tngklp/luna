@@ -19,6 +19,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "/help", description: "Show the keys and commands", argument: None },
     Command { name: "/new", description: "Start a new session", argument: None },
     Command { name: "/model", description: "Switch model", argument: Some("<provider/model>") },
+    Command { name: "/theme", description: "Switch the colour palette", argument: Some("<name>") },
     Command {
         name: "/thinking",
         description: "Set the reasoning effort",

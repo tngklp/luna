@@ -183,9 +183,11 @@ impl App {
             .unwrap_or_default();
 
         let theme_dir = luna_core::config::Paths::resolve().root.join("themes");
+        // The GUI opens on Wisteria Dark, so the TUI does too; `--theme` and
+        // `/theme` override it.
         let theme = match &theme_name {
             Some(name) => Theme::load(name, &theme_dir),
-            None => Theme::dark(),
+            None => Theme::load("wisteria-dark", &theme_dir),
         };
 
         let mut app = App {
@@ -716,6 +718,7 @@ impl App {
                     "commands",
                     "  /model <ref>   switch model, e.g. /model local/llama3.2",
                     "  /thinking <l>  off|minimal|low|medium|high|xhigh|max",
+                    "  /theme <name>  switch palette; /theme lists them",
                     "  /new           start a new session",
                     "  /sessions      browse saved sessions",
                     "  /attach <path> attach an image to the next message",
@@ -762,6 +765,21 @@ impl App {
                     level: "info".into(),
                     text: format!("thinking level: {}", level.as_str()),
                 });
+            }
+            "/theme" => {
+                if argument.is_empty() {
+                    let names = Theme::available(&self.theme_dir);
+                    self.lines.push(Line::Notice {
+                        level: "info".into(),
+                        text: format!("themes: {}", names.join(", ")),
+                    });
+                } else {
+                    self.theme = Theme::load(argument, &self.theme_dir);
+                    self.lines.push(Line::Notice {
+                        level: "info".into(),
+                        text: format!("theme set to {argument}"),
+                    });
+                }
             }
             "/sessions" => {
                 self.show_sessions = true;
